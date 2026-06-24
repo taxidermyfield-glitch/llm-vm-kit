@@ -52,6 +52,7 @@ out = []
 seen = set()
 
 for line in lines:
+    # clear stale downloaded path whenever model changes
     if line.startswith("AI_LOCAL_MODEL="):
         continue
 

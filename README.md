@@ -480,19 +480,19 @@ AI_CONTEXT_LENGTH="8192"
 Balanced coding:
 
 ```bash
-AI_CONTEXT_LENGTH="16384"
+AI_CONTEXT_LENGTH="8192"
 ```
 
 Heavier coding or agent work:
 
 ```bash
-AI_CONTEXT_LENGTH="32768"
+AI_CONTEXT_LENGTH="8192"
 ```
 
 Maximum agent context, if your GPU can handle it:
 
 ```bash
-AI_CONTEXT_LENGTH="64000"
+AI_CONTEXT_LENGTH="8192"
 ```
 
 After changing context length:

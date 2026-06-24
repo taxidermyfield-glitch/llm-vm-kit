@@ -5,6 +5,14 @@ AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo 
 # shellcheck disable=SC1091
 source "$AI_STACK_DIR/lib/env.sh"
 
+# Derive model quant/file tag from AI_HF_MODEL every time.
+# This prevents stale AI_MODEL_QUANT values like Q4_K_M from breaking split GGUF repos.
+if [[ "${AI_HF_MODEL:-}" == *:* ]]; then
+  AI_MODEL_QUANT="${AI_HF_MODEL##*:}"
+  export AI_MODEL_QUANT
+fi
+
+
 export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
 
 raw="${AI_HF_MODEL#hf.co/}"
