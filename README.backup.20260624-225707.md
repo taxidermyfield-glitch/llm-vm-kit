@@ -2,8 +2,6 @@
 
 `llm-vm-kit` is a portable setup kit for turning a fresh Ubuntu/CUDA GPU rental VM into a local AI workstation.
 
-Default model: `cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M`.
-
 After installation, you get three main commands:
 
 ```bash
@@ -22,9 +20,6 @@ Rent a fresh CUDA VM
 → use ai-chat, ai-code, and ai-agent from anywhere in the terminal
 ```
 
-
-> Current backend: this toolkit uses `llama.cpp` / `llama-server` by default, not Ollama. `llama-server` exposes a local OpenAI-compatible endpoint at `http://127.0.0.1:18080/v1`.
-
 The VM is disposable. The setup logic lives in this repo. Runtime state, downloaded models, Hermes memory, browser state, and working projects live under `/workspace`.
 
 ---
@@ -33,7 +28,7 @@ The VM is disposable. The setup logic lives in this repo. Runtime state, downloa
 
 This project gives you a repeatable local-AI machine setup.
 
-Instead of manually setting up llama.cpp, OpenCode, Hermes, browser automation, model paths, configs, and shell commands every time you rent a GPU VM, this repo does it with one installer:
+Instead of manually setting up Ollama, OpenCode, Hermes, browser automation, model paths, configs, and shell commands every time you rent a GPU VM, this repo does it with one installer:
 
 ```bash
 sudo bash bootstrap.sh
@@ -49,10 +44,8 @@ ai-model
 ai-pull
 ai-status
 ai-configure
-ai-llama-start
-ai-llama-stop
-ai-llama.cpp-start
-ai-llama.cpp-stop
+ai-ollama-start
+ai-ollama-stop
 ai-browser-start
 ai-browser-reset
 ai-backup
@@ -73,7 +66,7 @@ ai-agent  = autonomous worker using Hermes Agent with tools/browser/memory
 The installer configures:
 
 ```text
-llama.cpp     local model server
+Ollama        local model server
 OpenCode      coding agent
 Hermes Agent  autonomous terminal/browser/tool agent
 Node.js       needed for JS tools and MCP servers
@@ -108,10 +101,10 @@ Runtime files live here:
 
 ```text
 /workspace/ai/ai.env             main config file
-/workspace/ai/llama.cpp/models      downloaded Hugging Face / llama.cpp model cache
+/workspace/ai/ollama/models      downloaded Ollama models
 /workspace/ai/hermes             Hermes config, memory, sessions, env
 /workspace/ai/opencode           OpenCode config
-/workspace/ai/logs               llama.cpp and browser logs
+/workspace/ai/logs               Ollama and browser logs
 /workspace/projects              your actual project repos
 ```
 
@@ -164,15 +157,15 @@ This will:
 ```text
 install system packages
 install Node.js
-install llama.cpp
+install Ollama
 install OpenCode
 install Hermes Agent
 install Google Chrome for browser automation
 install the ai-* commands into /usr/local/bin
 create /workspace/ai/ai.env
-start llama-server
-download/cache the configured Hugging Face GGUF model through llama.cpp
-serve the model through a local OpenAI-compatible endpoint using the model name local-ai
+start Ollama
+pull the configured Hugging Face GGUF model
+create the local Ollama alias called local-ai
 ```
 
 After install:
@@ -205,13 +198,13 @@ ai-pull
 You can override the default model during install:
 
 ```bash
-sudo AI_HF_MODEL="hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M" bash bootstrap.sh
+sudo AI_HF_MODEL="hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M" bash bootstrap.sh
 ```
 
 You can also set context length during install:
 
 ```bash
-sudo AI_HF_MODEL="hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M" \
+sudo AI_HF_MODEL="hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M" \
      AI_CONTEXT_LENGTH="8192" \
      bash bootstrap.sh
 ```
@@ -249,11 +242,9 @@ Ctrl+X
 Important lines:
 
 ```bash
-AI_BACKEND="llamacpp"
-AI_HF_MODEL="hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M"
+AI_HF_MODEL="hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M"
 AI_MODEL="local-ai"
-AI_CONTEXT_LENGTH="8192"
-AI_OPENAI_BASE_URL="http://127.0.0.1:18080/v1"
+AI_CONTEXT_LENGTH="64000"
 AI_AUTO_BROWSER="1"
 AI_BROWSER_CDP_URL="http://127.0.0.1:9222"
 ```
@@ -261,8 +252,8 @@ AI_BROWSER_CDP_URL="http://127.0.0.1:9222"
 Meaning:
 
 ```text
-AI_HF_MODEL         Hugging Face GGUF model to serve
-AI_MODEL            model name exposed to OpenAI-compatible clients
+AI_HF_MODEL         Hugging Face GGUF model to pull
+AI_MODEL            local Ollama alias used by all commands
 AI_CONTEXT_LENGTH   context window size
 AI_AUTO_BROWSER     whether ai-agent auto-starts headless Chrome
 AI_BROWSER_CDP_URL  local Chrome DevTools browser endpoint
@@ -279,34 +270,27 @@ Usually you only edit:
 ```bash
 AI_HF_MODEL
 AI_CONTEXT_LENGTH
-AI_OPENAI_BASE_URL
 ```
 
 ---
 
 # 8. Hugging Face model format
 
-This toolkit uses **llama.cpp server** as the default backend.
+This toolkit uses Ollama.
 
-Models should still be Hugging Face **GGUF** models.
+When using Hugging Face, the model must be an Ollama-compatible **GGUF** model.
 
-Correct format in `/workspace/ai/ai.env`:
-
-```bash
-AI_HF_MODEL="hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M"
-```
-
-For llama.cpp internals, the toolkit converts this to:
+Correct format:
 
 ```bash
-OWNER/REPO:QUANT
+hf.co/OWNER/REPO:QUANT
 ```
 
 Examples:
 
 ```bash
-hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
-hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
+hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M
+hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M
 hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q6_K
 hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q8_0
 hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:BF16
@@ -321,7 +305,7 @@ HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive
 Correct:
 
 ```bash
-hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
+hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M
 ```
 
 If a short quant tag does not work, use the exact `.gguf` filename from the Hugging Face file list:
@@ -367,7 +351,7 @@ Use:
 Full model string:
 
 ```bash
-hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
+hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M
 ```
 
 If you see a table like this:
@@ -385,7 +369,7 @@ then valid model strings are:
 hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:BF16
 hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q8_0
 hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q6_K
-hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
+hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M
 ```
 
 ---
@@ -428,10 +412,10 @@ BF16
 ## Method 1: use ai-model
 
 ```bash
-ai-model hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
+ai-model hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M
 ```
 
-This updates `/workspace/ai/ai.env`, pulls the model, and rebuilds the OpenAI-compatible model name.
+This updates `/workspace/ai/ai.env`, pulls the model, and rebuilds the local Ollama alias.
 
 ## Method 2: edit manually
 
@@ -442,7 +426,7 @@ sudo nano /workspace/ai/ai.env
 Change:
 
 ```bash
-AI_HF_MODEL="hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M"
+AI_HF_MODEL="hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M"
 ```
 
 Then apply:
@@ -498,8 +482,9 @@ AI_CONTEXT_LENGTH="64000"
 After changing context length:
 
 ```bash
-ai-llama-stop
 ai-pull
+ai-ollama-stop
+ai-ollama-start
 ```
 
 Check:
@@ -520,7 +505,7 @@ Start local chat:
 ai-chat
 ```
 
-This opens an interactive llama.cpp chat session.
+This opens an interactive Ollama chat session.
 
 One-shot prompt:
 
@@ -597,7 +582,7 @@ ai-agent
 This automatically starts:
 
 ```text
-llama.cpp
+Ollama
 headless Chrome browser automation
 Hermes Agent
 ```
@@ -682,10 +667,10 @@ Check GPU:
 nvidia-smi
 ```
 
-Check llama-server logs:
+Check Ollama logs:
 
 ```bash
-cat /workspace/ai/logs/llama-server.log
+cat /workspace/ai/logs/ollama.log
 ```
 
 Check browser logs:
@@ -694,16 +679,16 @@ Check browser logs:
 cat /workspace/ai/logs/browser.log
 ```
 
-Check llama.cpp OpenAI-compatible model endpoint:
+Check active Ollama models:
 
 ```bash
-curl http://127.0.0.1:18080/v1/models
+ollama ps
 ```
 
-Check llama-server process:
+List local Ollama models:
 
 ```bash
-ps aux | grep llama-server | grep -v grep
+ollama list
 ```
 
 Check current config:
@@ -749,7 +734,7 @@ This restores:
 
 ```text
 /workspace/ai/ai.env
-/workspace/ai/llama.cpp/models
+/workspace/ai/ollama/models
 /workspace/ai/hermes
 /workspace/ai/opencode
 /workspace/projects
@@ -878,7 +863,7 @@ API keys
 browser cookies
 model files
 /workspace/ai/hermes/.env
-/workspace/ai/llama.cpp/models
+/workspace/ai/ollama/models
 ```
 
 Keep secrets in:
@@ -910,8 +895,9 @@ AI_CONTEXT_LENGTH="8192"
 Then:
 
 ```bash
-ai-llama-stop
 ai-pull
+ai-ollama-stop
+ai-ollama-start
 ```
 
 Use a Q4 model:
@@ -965,18 +951,18 @@ google-chrome --version
 
 ---
 
-## llama-server is not running
+## Ollama is not running
 
 Start it:
 
 ```bash
-ai-llama.cpp-start
+ai-ollama-start
 ```
 
 Check:
 
 ```bash
-curl http://127.0.0.1:18080/v1/models
+curl http://127.0.0.1:11434/api/tags
 ```
 
 ---
@@ -1043,7 +1029,7 @@ sudo AI_SKIP_PULL=1 bash bootstrap.sh
 Change model:
 
 ```bash
-ai-model hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
+ai-model hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M
 ```
 
 Edit config:

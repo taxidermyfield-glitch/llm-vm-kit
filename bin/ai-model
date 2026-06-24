@@ -18,7 +18,7 @@ if [[ $# -eq 0 ]]; then
   grep -E '^(AI_BACKEND|AI_HF_MODEL|AI_MODEL|AI_CONTEXT_LENGTH|AI_OPENAI_BASE_URL)=' "$ENV_FILE" || true
   echo
   echo "Example:"
-  echo '  ai-model hf.co/timteh673/Qwen3.5-397B-A17B-Uncensored-GGUF:Q4_K_M'
+  echo '  ai-model hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M'
   exit 0
 fi
 

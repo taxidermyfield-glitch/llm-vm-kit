@@ -12,11 +12,11 @@ if [[ -f "$AI_ENV_FILE" ]]; then
 fi
 
 : "${AI_BACKEND:=llamacpp}"
-: "${AI_HF_MODEL:=hf.co/timteh673/Qwen3.5-397B-A17B-Uncensored-GGUF:Q4_K_M}"
+: "${AI_HF_MODEL:=hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M}"
 : "${AI_LOCAL_MODEL:=}"
-: "${AI_MODEL_QUANT:=Q4_K_M}"
+: "${AI_MODEL_QUANT:=UD-IQ2_M}"
 : "${AI_MODEL:=local-ai}"
-: "${AI_CONTEXT_LENGTH:=131072}"
+: "${AI_CONTEXT_LENGTH:=8192}"
 
 : "${AI_HOME:=/workspace/ai}"
 : "${AI_PROJECTS:=/workspace/projects}"
