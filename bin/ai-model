@@ -15,7 +15,7 @@ fi
 if [[ $# -eq 0 ]]; then
   echo "Config: $ENV_FILE"
   echo
-  grep -E '^(AI_BACKEND|AI_HF_MODEL|AI_MODEL|AI_CONTEXT_LENGTH|AI_OPENAI_BASE_URL)=' "$ENV_FILE" || true
+  grep -E '^(AI_BACKEND|AI_HF_MODEL|AI_MODEL_QUANT|AI_LOCAL_MODEL|AI_MODEL|AI_CONTEXT_LENGTH|AI_OPENAI_BASE_URL)=' "$ENV_FILE" || true
   echo
   echo "Example:"
   echo '  ai-model hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M'
@@ -24,30 +24,54 @@ fi
 
 new_model="$1"
 
-python3 - "$ENV_FILE" "$new_model" <<'PY'
-import pathlib
+if [[ "$new_model" != *:* ]]; then
+  echo "Model must include a quant/tag after ':'" >&2
+  echo "Example:" >&2
+  echo "  hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M" >&2
+  exit 1
+fi
+
+new_quant="${new_model##*:}"
+
+python3 - "$ENV_FILE" "$new_model" "$new_quant" <<'PY'
+from pathlib import Path
 import sys
 
-path = pathlib.Path(sys.argv[1])
+path = Path(sys.argv[1])
 model = sys.argv[2]
+quant = sys.argv[3]
 
-lines = path.read_text().splitlines()
+updates = {
+    "AI_HF_MODEL": model,
+    "AI_MODEL_QUANT": quant,
+    "AI_BACKEND": "llamacpp",
+}
+
+lines = path.read_text().splitlines() if path.exists() else []
 out = []
-found = False
+seen = set()
 
 for line in lines:
-    if line.startswith("AI_HF_MODEL="):
-        out.append(f'AI_HF_MODEL="{model}"')
-        found = True
+    if line.startswith("AI_LOCAL_MODEL="):
+        continue
+
+    key = line.split("=", 1)[0] if "=" in line else None
+    if key in updates:
+        out.append(f'{key}="{updates[key]}"')
+        seen.add(key)
     else:
         out.append(line)
 
-if not found:
-    out.insert(0, f'AI_HF_MODEL="{model}"')
+for key, value in updates.items():
+    if key not in seen:
+        out.append(f'{key}="{value}"')
 
 path.write_text("\n".join(out) + "\n")
 PY
 
 echo "Set AI_HF_MODEL=$new_model"
-ai-llama-stop
+echo "Set AI_MODEL_QUANT=$new_quant"
+echo "Cleared stale AI_LOCAL_MODEL"
+
+ai-llama-stop 2>/dev/null || true
 ai-pull
