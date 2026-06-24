@@ -142,7 +142,7 @@ sudo apt-get install -y git curl ca-certificates
 Clone this repo:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/llm-vm-kit.git /opt/llm-vm-kit
+git clone https://github.com/taxidermyfield-glitch/llm-vm-kit.git /opt/llm-vm-kit
 cd /opt/llm-vm-kit
 ```
 
