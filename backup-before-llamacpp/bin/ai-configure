@@ -12,14 +12,14 @@ mkdir -p "$AI_OPENCODE_HOME" "$AI_HERMES_HOME" "$AI_PROJECTS"
 cat > "$AI_OPENCODE_HOME/opencode.json" <<EOF_JSON
 {
   "\$schema": "https://opencode.ai/config.json",
-  "model": "local/${AI_MODEL}",
+  "model": "ollama/${AI_MODEL}",
   "provider": {
-    "local": {
+    "ollama": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "Local llama.cpp",
+      "name": "Ollama Local",
       "options": {
-        "baseURL": "$(ai_openai_url)",
-        "apiKey": "llama"
+        "baseURL": "$(ai_ollama_openai_url)",
+        "apiKey": "ollama"
       },
       "models": {
         "${AI_MODEL}": {
@@ -44,8 +44,8 @@ cat > "$AI_HERMES_HOME/config.yaml" <<EOF_YAML
 model:
   default: "${AI_MODEL}"
   provider: custom
-  base_url: "$(ai_openai_url)"
-  api_key: "llama"
+  base_url: "$(ai_ollama_openai_url)"
+  api_key: "ollama"
   context_length: ${AI_CONTEXT_LENGTH}
 
 terminal:
@@ -70,9 +70,12 @@ agent:
 delegation:
   model: "${AI_MODEL}"
   provider: custom
-  base_url: "$(ai_openai_url)"
-  api_key: "llama"
+  base_url: "$(ai_ollama_openai_url)"
+  api_key: "ollama"
   max_iterations: 30
+
+toolsets:
+  - hermes-cli
 
 web:
   search_backend: "${AI_WEB_SEARCH_BACKEND}"
@@ -90,6 +93,20 @@ if [[ -n "$AI_BROWSER_CDP_URL" ]]; then
 browser:
   cdp_url: "${AI_BROWSER_CDP_URL}"
 EOF_YAML
+fi
+
+if [[ ! -f "$AI_HERMES_HOME/SOUL.md" ]]; then
+  cat > "$AI_HERMES_HOME/SOUL.md" <<'EOF_SOUL'
+You are an autonomous research and engineering worker running on a rented GPU VM.
+
+Default behavior:
+- Work inside /workspace/projects unless instructed otherwise.
+- Use web/search/browser tools for current external facts.
+- Use terminal and code execution carefully.
+- Prefer reversible steps and keep an audit trail.
+- Ask before destructive filesystem operations, credential handling, purchases, account actions, or irreversible external side effects.
+- When building tools or MCP servers, document setup, test commands, and expected inputs/outputs.
+EOF_SOUL
 fi
 
 touch "$AI_HERMES_HOME/.env"

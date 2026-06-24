@@ -5,11 +5,14 @@ AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo 
 # shellcheck disable=SC1091
 source "$AI_STACK_DIR/lib/env.sh"
 
-ai-llama-start >/dev/null
+: "${AI_AUTO_BROWSER:=1}"
 
-if [[ "${AI_AUTO_BROWSER:-1}" == "1" ]]; then
-  if command -v ai-browser-start >/dev/null 2>&1; then
-    ai-browser-start --quiet || echo "Warning: browser automation could not start." >&2
+ai-ollama-start >/dev/null
+
+if [[ "$AI_AUTO_BROWSER" == "1" ]]; then
+  if ! ai-browser-start --quiet; then
+    echo "Warning: browser automation could not start. Hermes will still launch, but browser tools may fail." >&2
+    echo "See: $AI_HOME/logs/browser.log" >&2
   fi
 fi
 

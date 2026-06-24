@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/env.sh"
+
+case "$AI_HF_MODEL" in
+  hf.co/*|huggingface.co/*)
+    ;;
+  *)
+    echo "AI_HF_MODEL must be an Ollama-compatible Hugging Face GGUF reference." >&2
+    echo "Example: hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M" >&2
+    exit 1
+    ;;
+esac
+
+ai-ollama-start >/dev/null
+
+echo "Pulling Hugging Face GGUF model:"
+echo "  $AI_HF_MODEL"
+ollama pull "$AI_HF_MODEL"
+
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+base="$tmpdir/Modelfile.base"
+final="$tmpdir/Modelfile"
+
+if ! ollama show --modelfile "$AI_HF_MODEL" > "$base" 2>/dev/null; then
+  cat > "$base" <<EOF_MODEL
+FROM ${AI_HF_MODEL}
+EOF_MODEL
+fi
+
+python3 - "$base" "$final" "$AI_CONTEXT_LENGTH" <<'PY'
+import pathlib
+import sys
+
+src = pathlib.Path(sys.argv[1])
+dst = pathlib.Path(sys.argv[2])
+ctx = sys.argv[3]
+
+lines = src.read_text().splitlines()
+out = []
+seen_num_ctx = False
+
+for line in lines:
+    stripped = line.strip()
+    if stripped.startswith("PARAMETER num_ctx"):
+        if not seen_num_ctx:
+            out.append(f"PARAMETER num_ctx {ctx}")
+            seen_num_ctx = True
+        continue
+    out.append(line)
+
+if not seen_num_ctx:
+    out.append(f"PARAMETER num_ctx {ctx}")
+
+dst.write_text("\n".join(out) + "\n")
+PY
+
+echo "Creating local Ollama alias:"
+echo "  ${AI_MODEL} -> ${AI_HF_MODEL}"
+ollama create "$AI_MODEL" -f "$final"
+
+ai-configure --quiet
+
+echo "Done. ai-chat, ai-code, and ai-agent now use: $AI_MODEL"

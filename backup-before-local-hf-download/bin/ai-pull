@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/env.sh"
+
+echo "Using llama.cpp backend. ai-pull now starts llama-server and lets llama.cpp download/cache the HF GGUF."
+ai-llama-start

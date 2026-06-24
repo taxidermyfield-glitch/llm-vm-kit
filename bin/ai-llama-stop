@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+pkill -f "llama-server.*--port" 2>/dev/null || true
+pkill -f "llama-server.*-hf" 2>/dev/null || true
+echo "Stopped llama-server if it was running."

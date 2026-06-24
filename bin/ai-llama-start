@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/env.sh"
+
+mkdir -p "$AI_HOME/logs" "$AI_HOME/llama-cache"
+
+server_url="http://${AI_LLAMA_HOST}:${AI_LLAMA_PORT}"
+openai_url="${server_url}/v1"
+log_file="$AI_HOME/logs/llama-server.log"
+
+if curl -fsS "${openai_url}/models" >/dev/null 2>&1; then
+  echo "llama-server already running at ${openai_url}"
+  exit 0
+fi
+
+if ! command -v llama-server >/dev/null 2>&1; then
+  echo "llama-server not found. Run bootstrap.sh first." >&2
+  exit 1
+fi
+
+model_ref="$(ai_llama_model_ref)"
+
+model_args=()
+if [[ -n "${AI_LOCAL_MODEL:-}" && -f "$AI_LOCAL_MODEL" ]]; then
+  echo "Using local GGUF model file:"
+  echo "$AI_LOCAL_MODEL"
+  model_args=(-m "$AI_LOCAL_MODEL")
+else
+  echo "No AI_LOCAL_MODEL file found. Falling back to -hf download:"
+  echo "$model_ref"
+  model_args=(-hf "$model_ref")
+fi
+
+echo "Starting llama-server..."
+echo "Context: $AI_CONTEXT_LENGTH"
+echo "Endpoint: $openai_url"
+echo "Log: $log_file"
+
+pkill -f "llama-server.*--port ${AI_LLAMA_PORT}" 2>/dev/null || true
+sleep 1
+
+nohup env \
+  CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}" \
+  LLAMA_CACHE="$AI_HOME/llama-cache" \
+  llama-server \
+    "${model_args[@]}" \
+    --host "$AI_LLAMA_HOST" \
+    --port "$AI_LLAMA_PORT" \
+    -c "$AI_CONTEXT_LENGTH" \
+    -ngl "$AI_LLAMA_NGL" \
+    --split-mode "$AI_LLAMA_SPLIT_MODE" \
+  > "$log_file" 2>&1 &
+
+pid="$!"
+echo "$pid" > "$AI_HOME/logs/llama-server.pid"
+
+for _ in $(seq 1 240); do
+  if curl -fsS "${openai_url}/models" >/dev/null 2>&1; then
+    echo "llama-server ready at $openai_url"
+    exit 0
+  fi
+
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "llama-server exited before becoming ready." >&2
+    echo
+    echo "Last 200 log lines:" >&2
+    tail -200 "$log_file" >&2 || true
+    exit 1
+  fi
+
+  sleep 2
+done
+
+echo "llama-server did not become ready in time." >&2
+echo
+echo "Last 200 log lines:" >&2
+tail -200 "$log_file" >&2 || true
+exit 1

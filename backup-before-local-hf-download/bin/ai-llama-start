@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/env.sh"
+
+mkdir -p "$AI_HOME/logs" "$AI_HOME/llama-cache"
+
+if curl -fsS "http://${AI_LLAMA_HOST}:${AI_LLAMA_PORT}/v1/models" >/dev/null 2>&1; then
+  echo "llama-server already running at $(ai_openai_url)"
+  exit 0
+fi
+
+if ! command -v llama-server >/dev/null 2>&1; then
+  echo "llama-server not found. Run bootstrap.sh first or install llama.cpp." >&2
+  exit 1
+fi
+
+model_ref="$(ai_llama_model_ref)"
+
+echo "Starting llama-server..."
+echo "Model: $model_ref"
+echo "Context: $AI_CONTEXT_LENGTH"
+echo "Endpoint: $(ai_openai_url)"
+
+# shellcheck disable=SC2086
+nohup env \
+  CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}" \
+  LLAMA_CACHE="$AI_HOME/llama-cache" \
+  llama-server \
+    -hf "$model_ref" \
+    --host "$AI_LLAMA_HOST" \
+    --port "$AI_LLAMA_PORT" \
+    -c "$AI_CONTEXT_LENGTH" \
+    -ngl "$AI_LLAMA_NGL" \
+    --split-mode "$AI_LLAMA_SPLIT_MODE" \
+    $AI_LLAMA_EXTRA_ARGS \
+  > "$AI_HOME/logs/llama-server.log" 2>&1 &
+
+for _ in $(seq 1 180); do
+  if curl -fsS "http://${AI_LLAMA_HOST}:${AI_LLAMA_PORT}/v1/models" >/dev/null 2>&1; then
+    echo "llama-server ready at $(ai_openai_url)"
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "llama-server did not become ready. See log:" >&2
+echo "$AI_HOME/logs/llama-server.log" >&2
+tail -100 "$AI_HOME/logs/llama-server.log" >&2 || true
+exit 1

@@ -137,100 +137,19 @@ install_uv() {
 install_node
 install_uv
 
-
-find_nvcc() {
-  local nvcc_path
-
-  nvcc_path="$(command -v nvcc 2>/dev/null || true)"
-  if [[ -n "$nvcc_path" ]]; then
-    echo "$nvcc_path"
-    return 0
-  fi
-
-  nvcc_path="$(find /usr/local/cuda* -path '*/bin/nvcc' -type f 2>/dev/null | sort -V | tail -n 1 || true)"
-  if [[ -n "$nvcc_path" ]]; then
-    echo "$nvcc_path"
-    return 0
-  fi
-
-  return 1
-}
-
-install_cuda_compiler() {
-  if find_nvcc >/dev/null 2>&1; then
-    echo "CUDA compiler already available: $(find_nvcc)"
-    return 0
-  fi
-
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "apt-get not found and nvcc is missing. Use a CUDA devel image/template." >&2
-    return 1
-  fi
-
-  echo "Installing CUDA compiler / nvcc..."
-  $SUDO apt-get update
-  $SUDO apt-get install -y ca-certificates curl gnupg build-essential cmake pkg-config ccache
-
-  # Prefer CUDA 13 packages when available, then CUDA 12.8, then toolkit fallbacks.
-  if apt-cache show cuda-nvcc-13-0 >/dev/null 2>&1; then
-    $SUDO apt-get install -y cuda-nvcc-13-0 cuda-cudart-dev-13-0 libcublas-dev-13-0
-  elif apt-cache show cuda-toolkit-13-0 >/dev/null 2>&1; then
-    $SUDO apt-get install -y cuda-toolkit-13-0
-  elif apt-cache show cuda-nvcc-12-8 >/dev/null 2>&1; then
-    $SUDO apt-get install -y cuda-nvcc-12-8 cuda-cudart-dev-12-8 libcublas-dev-12-8
-  elif apt-cache show cuda-toolkit-12-8 >/dev/null 2>&1; then
-    $SUDO apt-get install -y cuda-toolkit-12-8
-  elif apt-cache show nvidia-cuda-toolkit >/dev/null 2>&1; then
-    $SUDO apt-get install -y nvidia-cuda-toolkit
-  else
-    echo "No CUDA compiler package found in apt." >&2
-    echo "This VM likely uses a CUDA runtime image instead of a CUDA devel image." >&2
-    echo "Use a CUDA/PyTorch devel template or manually install NVIDIA CUDA toolkit." >&2
-    return 1
-  fi
-
-  if ! find_nvcc >/dev/null 2>&1; then
-    echo "nvcc still not found after CUDA compiler install." >&2
-    echo "Debug:" >&2
-    echo "  find /usr/local/cuda* -path '*/bin/nvcc' -type f" >&2
-    find /usr/local/cuda* -path '*/bin/nvcc' -type f 2>/dev/null || true
-    return 1
-  fi
-
-  echo "Installed CUDA compiler: $(find_nvcc)"
-  "$(find_nvcc)" --version
-}
-
 install_llama_cpp() {
   if command -v llama-server >/dev/null 2>&1; then
-    echo "llama-server already installed: $(command -v llama-server)"
     return 0
   fi
 
-  install_cuda_compiler
-
-  local nvcc_path
-  nvcc_path="$(find_nvcc)"
-
-  export CUDACXX="$nvcc_path"
-  export CUDA_HOME="$(dirname "$(dirname "$nvcc_path")")"
-  export PATH="$CUDA_HOME/bin:$PATH"
-  export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
-
-  echo "Building llama.cpp with CUDA..."
-  echo "CUDACXX=$CUDACXX"
-  echo "CUDA_HOME=$CUDA_HOME"
-
+  echo "Installing llama.cpp with CUDA support..."
   $SUDO apt-get update
-  $SUDO apt-get install -y git cmake build-essential curl libcurl4-openssl-dev pkg-config ccache
+  $SUDO apt-get install -y git cmake build-essential curl libcurl4-openssl-dev pkg-config
 
   $SUDO mkdir -p /opt
-
   if [[ -d /opt/llama.cpp/.git ]]; then
-    echo "Updating existing /opt/llama.cpp..."
     $SUDO git -C /opt/llama.cpp pull --ff-only || true
   else
-    echo "Cloning llama.cpp..."
     $SUDO rm -rf /opt/llama.cpp
     $SUDO git clone https://github.com/ggml-org/llama.cpp.git /opt/llama.cpp
   fi
@@ -240,12 +159,9 @@ install_llama_cpp() {
   fi
 
   cd /opt/llama.cpp
-
-  rm -rf build
-
   cmake -B build \
     -DGGML_CUDA=ON \
-    -DCMAKE_CUDA_COMPILER="$nvcc_path" \
+    -DLLAMA_CURL=ON \
     -DCMAKE_BUILD_TYPE=Release
 
   cmake --build build --config Release -j"$(nproc)"
@@ -253,13 +169,9 @@ install_llama_cpp() {
   $SUDO ln -sf /opt/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 
   cd "$STACK_DIR"
-
-  echo "llama.cpp CUDA build complete."
-  llama-server --help | head -20 || true
 }
 
 install_llama_cpp
-
 
 
 install_browser_support() {

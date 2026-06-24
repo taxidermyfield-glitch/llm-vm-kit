@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/env.sh"
+
+port="${AI_BROWSER_CDP_PORT:-9222}"
+
+echo "Stopping Chrome/Chromium processes using browser automation profile..."
+
+pkill -f "remote-debugging-port=${port}" 2>/dev/null || true
+pkill -f "${AI_HOME}/browser-profile" 2>/dev/null || true
+
+sleep 2
+
+rm -rf "${AI_HOME}/browser-profile"
+mkdir -p "${AI_HOME}/browser-profile" "${AI_HOME}/logs"
+
+echo "Browser profile reset."

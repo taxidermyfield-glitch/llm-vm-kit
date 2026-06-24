@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/env.sh"
+
+export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
+
+raw="${AI_HF_MODEL#hf.co/}"
+raw="${raw#https://huggingface.co/}"
+
+repo="${raw%%:*}"
+tag="${raw#*:}"
+
+# If AI_HF_MODEL has no colon/tag, use AI_MODEL_QUANT.
+if [[ "$tag" == "$raw" ]]; then
+  tag="${AI_MODEL_QUANT:-Q4_K_M}"
+fi
+
+# Prefer explicit AI_MODEL_QUANT if set.
+quant="${AI_MODEL_QUANT:-$tag}"
+
+download_root="${AI_HOME}/models"
+mkdir -p "$download_root"
+
+echo "Hugging Face repo: $repo"
+echo "Requested quant/file: $quant"
+echo "Download root: $download_root"
+
+selected_file="$(
+python3 - "$repo" "$quant" <<'PY'
+import json
+import sys
+import urllib.request
+
+repo = sys.argv[1]
+quant = sys.argv[2]
+api = f"https://huggingface.co/api/models/{repo}"
+
+with urllib.request.urlopen(api, timeout=120) as r:
+    data = json.load(r)
+
+files = [
+    s.get("rfilename", "")
+    for s in data.get("siblings", [])
+    if s.get("rfilename", "").endswith(".gguf")
+]
+
+if not files:
+    print(f"No .gguf files found in {repo}", file=sys.stderr)
+    raise SystemExit(1)
+
+# If user supplied an exact GGUF filename, use it.
+if quant.endswith(".gguf"):
+    if quant in files:
+        print(quant)
+        raise SystemExit(0)
+    print(f"Exact GGUF file not found: {quant}", file=sys.stderr)
+    print("Available GGUF files:", file=sys.stderr)
+    for f in files:
+        print("  " + f, file=sys.stderr)
+    raise SystemExit(1)
+
+matches = [f for f in files if quant in f]
+
+if not matches:
+    print(f"No GGUF matching quant/tag '{quant}' found.", file=sys.stderr)
+    print("Available GGUF files:", file=sys.stderr)
+    for f in files:
+        print("  " + f, file=sys.stderr)
+    raise SystemExit(1)
+
+# Prefer a single-file GGUF. Avoid split files unless no single file exists.
+single = [f for f in matches if "split" not in f.lower() and "00001-of" not in f.lower()]
+chosen = single[0] if single else matches[0]
+print(chosen)
+PY
+)"
+
+echo "Selected GGUF file: $selected_file"
+
+echo "Downloading with hf download..."
+mkdir -p "$download_root/$repo"
+
+export HF_XET_HIGH_PERFORMANCE="${HF_XET_HIGH_PERFORMANCE:-1}"
+
+hf download "$repo" "$selected_file" \
+  --local-dir "$download_root/$repo"
+
+local_path="$download_root/$repo/$selected_file"
+
+if [[ ! -f "$local_path" ]]; then
+  echo "Download finished but file not found at expected path:" >&2
+  echo "$local_path" >&2
+  echo "Searching..." >&2
+  local_path="$(find "$download_root/$repo" -name "$(basename "$selected_file")" -type f | head -n 1 || true)"
+fi
+
+if [[ -z "${local_path:-}" || ! -f "$local_path" ]]; then
+  echo "ERROR: Could not locate downloaded GGUF file." >&2
+  exit 1
+fi
+
+echo "Downloaded local model:"
+ls -lh "$local_path"
+
+# Persist local model path into env.
+python3 - "$AI_ENV_FILE" "$local_path" "$quant" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+local_model = sys.argv[2]
+quant = sys.argv[3]
+
+updates = {
+    "AI_LOCAL_MODEL": local_model,
+    "AI_MODEL_QUANT": quant,
+}
+
+lines = path.read_text().splitlines() if path.exists() else []
+out = []
+seen = set()
+
+for line in lines:
+    key = line.split("=", 1)[0] if "=" in line else None
+    if key in updates:
+        out.append(f'{key}="{updates[key]}"')
+        seen.add(key)
+    else:
+        out.append(line)
+
+for key, value in updates.items():
+    if key not in seen:
+        out.append(f'{key}="{value}"')
+
+path.write_text("\n".join(out) + "\n")
+PY
+
+echo "Updated env:"
+grep -E '^(AI_HF_MODEL|AI_MODEL_QUANT|AI_LOCAL_MODEL|AI_CONTEXT_LENGTH)=' "$AI_ENV_FILE" || true
