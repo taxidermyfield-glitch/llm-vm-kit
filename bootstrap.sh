@@ -137,6 +137,55 @@ install_uv() {
 install_node
 install_uv
 
+install_hf_cli() {
+  if command -v hf >/dev/null 2>&1; then
+    echo "Hugging Face CLI already installed: $(command -v hf)"
+    hf version || true
+    return 0
+  fi
+
+  echo "Installing Hugging Face CLI command: hf"
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "apt-get not found and hf is missing. Install huggingface_hub manually." >&2
+    return 1
+  fi
+
+  $SUDO apt-get update
+  $SUDO apt-get install -y python3 python3-venv python3-pip ca-certificates
+
+  $SUDO mkdir -p /opt
+
+  if [[ ! -d /opt/hf-cli-venv ]]; then
+    $SUDO python3 -m venv /opt/hf-cli-venv
+  fi
+
+  $SUDO /opt/hf-cli-venv/bin/pip install --upgrade pip setuptools wheel
+  $SUDO /opt/hf-cli-venv/bin/pip install --upgrade "huggingface_hub[cli]"
+
+  $SUDO ln -sf /opt/hf-cli-venv/bin/hf /usr/local/bin/hf
+
+  if [[ -x /opt/hf-cli-venv/bin/huggingface-cli ]]; then
+    $SUDO ln -sf /opt/hf-cli-venv/bin/huggingface-cli /usr/local/bin/huggingface-cli
+  fi
+
+  hash -r || true
+
+  if ! command -v hf >/dev/null 2>&1; then
+    echo "hf command still not found after install." >&2
+    echo "Debug:" >&2
+    echo "  ls -lah /opt/hf-cli-venv/bin" >&2
+    ls -lah /opt/hf-cli-venv/bin >&2 || true
+    return 1
+  fi
+
+  echo "Installed Hugging Face CLI: $(command -v hf)"
+  hf version || hf --help | head -20 || true
+}
+
+install_hf_cli
+
+
 
 find_nvcc() {
   local nvcc_path
