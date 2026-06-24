@@ -25,7 +25,7 @@ fi
 : "${OLLAMA_MODELS:=$AI_HOME/ollama/models}"
 
 : "${AI_LLAMA_HOST:=127.0.0.1}"
-: "${AI_LLAMA_PORT:=8080}"
+: "${AI_LLAMA_PORT:=18080}"
 : "${AI_OPENAI_BASE_URL:=http://${AI_LLAMA_HOST}:${AI_LLAMA_PORT}/v1}"
 : "${AI_LLAMA_NGL:=999}"
 : "${AI_LLAMA_SPLIT_MODE:=layer}"

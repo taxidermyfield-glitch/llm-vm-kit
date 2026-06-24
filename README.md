@@ -21,7 +21,7 @@ Rent a fresh CUDA VM
 ```
 
 
-> Current backend: this toolkit uses `llama.cpp` / `llama-server` by default, not Ollama. `llama-server` exposes a local OpenAI-compatible endpoint at `http://127.0.0.1:8080/v1`.
+> Current backend: this toolkit uses `llama.cpp` / `llama-server` by default, not Ollama. `llama-server` exposes a local OpenAI-compatible endpoint at `http://127.0.0.1:18080/v1`.
 
 The VM is disposable. The setup logic lives in this repo. Runtime state, downloaded models, Hermes memory, browser state, and working projects live under `/workspace`.
 
@@ -251,7 +251,7 @@ AI_BACKEND="llamacpp"
 AI_HF_MODEL="hf.co/timteh673/Qwen3.5-397B-A17B-Uncensored-GGUF:Q4_K_M"
 AI_MODEL="local-ai"
 AI_CONTEXT_LENGTH="131072"
-AI_OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
+AI_OPENAI_BASE_URL="http://127.0.0.1:18080/v1"
 AI_AUTO_BROWSER="1"
 AI_BROWSER_CDP_URL="http://127.0.0.1:9222"
 ```
@@ -695,7 +695,7 @@ cat /workspace/ai/logs/browser.log
 Check llama.cpp OpenAI-compatible model endpoint:
 
 ```bash
-curl http://127.0.0.1:8080/v1/models
+curl http://127.0.0.1:18080/v1/models
 ```
 
 Check llama-server process:
@@ -974,7 +974,7 @@ ai-llama.cpp-start
 Check:
 
 ```bash
-curl http://127.0.0.1:8080/v1/models
+curl http://127.0.0.1:18080/v1/models
 ```
 
 ---
