@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/env.sh"
+
+: "${AI_AUTO_BROWSER:=1}"
+
+ai-ollama-start >/dev/null
+
+if [[ "$AI_AUTO_BROWSER" == "1" ]]; then
+  if ! ai-browser-start --quiet; then
+    echo "Warning: browser automation could not start. Hermes will still launch, but browser tools may fail." >&2
+    echo "See: $AI_HOME/logs/browser.log" >&2
+  fi
+fi
+
+ai-configure --quiet
+
+export HERMES_HOME="$AI_HERMES_HOME"
+
+if [[ $# -gt 0 ]]; then
+  exec hermes chat --toolsets "$AI_AGENT_TOOLSETS" -q "$*"
+else
+  exec hermes chat --toolsets "$AI_AGENT_TOOLSETS"
+fi

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/env.sh"
+
+echo "Config:"
+echo "  AI_ENV_FILE:        $AI_ENV_FILE"
+echo "  AI_HF_MODEL:        $AI_HF_MODEL"
+echo "  AI_MODEL alias:     $AI_MODEL"
+echo "  AI_CONTEXT_LENGTH:  $AI_CONTEXT_LENGTH"
+echo "  AI_HOME:            $AI_HOME"
+echo "  AI_PROJECTS:        $AI_PROJECTS"
+echo "  OLLAMA_MODELS:      $OLLAMA_MODELS"
+echo "  HERMES_HOME:        $AI_HERMES_HOME"
+echo
+
+echo "GPU:"
+if command -v nvidia-smi >/dev/null 2>&1; then
+  nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader || true
+else
+  echo "  nvidia-smi not found"
+fi
+echo
+
+echo "Tools:"
+for cmd in ollama opencode hermes ai-chat ai-code ai-agent ai-model ai-pull; do
+  printf "  %-16s " "$cmd"
+  command -v "$cmd" || true
+done
+echo
+
+echo "Ollama:"
+if curl -fsS "$(ai_ollama_url)/api/tags" >/dev/null 2>&1; then
+  echo "  server: running at $(ai_ollama_url)"
+  echo "  models:"
+  curl -fsS "$(ai_ollama_url)/api/tags" | jq -r '.models[].name' 2>/dev/null | sed 's/^/    /' || true
+  echo
+  echo "  loaded:"
+  ollama ps || true
+else
+  echo "  server: not running"
+fi

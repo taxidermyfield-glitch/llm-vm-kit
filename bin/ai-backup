@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ts="$(date +%Y%m%d-%H%M%S)"
+out="/workspace/ai-vm-state-${ts}.tgz"
+
+mkdir -p /workspace
+tar -czf "$out" -C /workspace ai projects 2>/dev/null || true
+
+echo "$out"
