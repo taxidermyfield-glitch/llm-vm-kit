@@ -7,59 +7,70 @@ source "$AI_STACK_DIR/lib/env.sh"
 
 ai-llama-start >/dev/null
 
-python3 - "$AI_MODEL" "$(ai_openai_url)" "$*" <<'PY'
+python3 -c '
 import json
 import sys
 import urllib.request
 
 model = sys.argv[1]
 base_url = sys.argv[2].rstrip("/")
-one_shot = sys.argv[3].strip() if len(sys.argv) > 3 else ""
+args = sys.argv[3:]
 
 messages = []
 
 def ask(prompt: str) -> str:
     messages.append({"role": "user", "content": prompt})
-    data = json.dumps({
+
+    payload = {
         "model": model,
         "messages": messages,
         "temperature": 0.4,
-        "max_tokens": 2048
-    }).encode()
+        "max_tokens": 2048,
+    }
+
+    data = json.dumps(payload).encode("utf-8")
 
     req = urllib.request.Request(
         f"{base_url}/chat/completions",
         data=data,
         headers={"Content-Type": "application/json"},
-        method="POST"
+        method="POST",
     )
 
     with urllib.request.urlopen(req, timeout=900) as r:
-        obj = json.loads(r.read().decode())
+        raw = r.read().decode("utf-8")
+        obj = json.loads(raw)
 
     reply = obj["choices"][0]["message"]["content"]
     messages.append({"role": "assistant", "content": reply})
     return reply
 
-if one_shot:
-    print(ask(one_shot))
-    raise SystemExit
+if args:
+    prompt = " ".join(args).strip()
+    if prompt:
+        print(ask(prompt))
+    raise SystemExit(0)
 
-print("ai-chat connected to llama.cpp. Type /bye to exit.")
+print("ai-chat connected to llama.cpp. Type /bye, /exit, quit, or Ctrl+C to exit.")
+
 while True:
     try:
         prompt = input("\nyou> ").strip()
-    except (EOFError, KeyboardInterrupt):
+    except KeyboardInterrupt:
+        print()
+        break
+    except EOFError:
         print()
         break
 
-    if prompt in {"/bye", "/exit", "exit", "quit"}:
-        break
     if not prompt:
         continue
+
+    if prompt.lower() in {"/bye", "/exit", "exit", "quit"}:
+        break
 
     try:
         print("\nai> " + ask(prompt))
     except Exception as e:
         print(f"\nerror: {e}", file=sys.stderr)
-PY
+' "$AI_MODEL" "$(ai_openai_url)" "$@"
