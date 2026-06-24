@@ -20,6 +20,9 @@ Rent a fresh CUDA VM
 → use ai-chat, ai-code, and ai-agent from anywhere in the terminal
 ```
 
+
+> Current backend: this toolkit uses `llama.cpp` / `llama-server` by default, not Ollama. `llama-server` exposes a local OpenAI-compatible endpoint at `http://127.0.0.1:8080/v1`.
+
 The VM is disposable. The setup logic lives in this repo. Runtime state, downloaded models, Hermes memory, browser state, and working projects live under `/workspace`.
 
 ---
@@ -28,7 +31,7 @@ The VM is disposable. The setup logic lives in this repo. Runtime state, downloa
 
 This project gives you a repeatable local-AI machine setup.
 
-Instead of manually setting up Ollama, OpenCode, Hermes, browser automation, model paths, configs, and shell commands every time you rent a GPU VM, this repo does it with one installer:
+Instead of manually setting up llama.cpp, OpenCode, Hermes, browser automation, model paths, configs, and shell commands every time you rent a GPU VM, this repo does it with one installer:
 
 ```bash
 sudo bash bootstrap.sh
@@ -44,8 +47,10 @@ ai-model
 ai-pull
 ai-status
 ai-configure
-ai-ollama-start
-ai-ollama-stop
+ai-llama-start
+ai-llama-stop
+ai-llama.cpp-start
+ai-llama.cpp-stop
 ai-browser-start
 ai-browser-reset
 ai-backup
@@ -66,7 +71,7 @@ ai-agent  = autonomous worker using Hermes Agent with tools/browser/memory
 The installer configures:
 
 ```text
-Ollama        local model server
+llama.cpp     local model server
 OpenCode      coding agent
 Hermes Agent  autonomous terminal/browser/tool agent
 Node.js       needed for JS tools and MCP servers
@@ -101,10 +106,10 @@ Runtime files live here:
 
 ```text
 /workspace/ai/ai.env             main config file
-/workspace/ai/ollama/models      downloaded Ollama models
+/workspace/ai/llama.cpp/models      downloaded Hugging Face / llama.cpp model cache
 /workspace/ai/hermes             Hermes config, memory, sessions, env
 /workspace/ai/opencode           OpenCode config
-/workspace/ai/logs               Ollama and browser logs
+/workspace/ai/logs               llama.cpp and browser logs
 /workspace/projects              your actual project repos
 ```
 
@@ -157,15 +162,15 @@ This will:
 ```text
 install system packages
 install Node.js
-install Ollama
+install llama.cpp
 install OpenCode
 install Hermes Agent
 install Google Chrome for browser automation
 install the ai-* commands into /usr/local/bin
 create /workspace/ai/ai.env
-start Ollama
-pull the configured Hugging Face GGUF model
-create the local Ollama alias called local-ai
+start llama-server
+download/cache the configured Hugging Face GGUF model through llama.cpp
+serve the model through a local OpenAI-compatible endpoint using the model name local-ai
 ```
 
 After install:
@@ -242,9 +247,11 @@ Ctrl+X
 Important lines:
 
 ```bash
-AI_HF_MODEL="hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M"
+AI_BACKEND="llamacpp"
+AI_HF_MODEL="hf.co/timteh673/Qwen3.5-397B-A17B-Uncensored-GGUF:Q4_K_M"
 AI_MODEL="local-ai"
-AI_CONTEXT_LENGTH="64000"
+AI_CONTEXT_LENGTH="131072"
+AI_OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
 AI_AUTO_BROWSER="1"
 AI_BROWSER_CDP_URL="http://127.0.0.1:9222"
 ```
@@ -252,8 +259,8 @@ AI_BROWSER_CDP_URL="http://127.0.0.1:9222"
 Meaning:
 
 ```text
-AI_HF_MODEL         Hugging Face GGUF model to pull
-AI_MODEL            local Ollama alias used by all commands
+AI_HF_MODEL         Hugging Face GGUF model to serve
+AI_MODEL            model name exposed to OpenAI-compatible clients
 AI_CONTEXT_LENGTH   context window size
 AI_AUTO_BROWSER     whether ai-agent auto-starts headless Chrome
 AI_BROWSER_CDP_URL  local Chrome DevTools browser endpoint
@@ -270,20 +277,27 @@ Usually you only edit:
 ```bash
 AI_HF_MODEL
 AI_CONTEXT_LENGTH
+AI_OPENAI_BASE_URL
 ```
 
 ---
 
 # 8. Hugging Face model format
 
-This toolkit uses Ollama.
+This toolkit uses **llama.cpp server** as the default backend.
 
-When using Hugging Face, the model must be an Ollama-compatible **GGUF** model.
+Models should still be Hugging Face **GGUF** models.
 
-Correct format:
+Correct format in `/workspace/ai/ai.env`:
 
 ```bash
-hf.co/OWNER/REPO:QUANT
+AI_HF_MODEL="hf.co/OWNER/REPO:QUANT"
+```
+
+For llama.cpp internals, the toolkit converts this to:
+
+```bash
+OWNER/REPO:QUANT
 ```
 
 Examples:
@@ -415,7 +429,7 @@ BF16
 ai-model hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M
 ```
 
-This updates `/workspace/ai/ai.env`, pulls the model, and rebuilds the local Ollama alias.
+This updates `/workspace/ai/ai.env`, pulls the model, and rebuilds the OpenAI-compatible model name.
 
 ## Method 2: edit manually
 
@@ -482,9 +496,8 @@ AI_CONTEXT_LENGTH="64000"
 After changing context length:
 
 ```bash
+ai-llama-stop
 ai-pull
-ai-ollama-stop
-ai-ollama-start
 ```
 
 Check:
@@ -505,7 +518,7 @@ Start local chat:
 ai-chat
 ```
 
-This opens an interactive Ollama chat session.
+This opens an interactive llama.cpp chat session.
 
 One-shot prompt:
 
@@ -582,7 +595,7 @@ ai-agent
 This automatically starts:
 
 ```text
-Ollama
+llama.cpp
 headless Chrome browser automation
 Hermes Agent
 ```
@@ -667,10 +680,10 @@ Check GPU:
 nvidia-smi
 ```
 
-Check Ollama logs:
+Check llama-server logs:
 
 ```bash
-cat /workspace/ai/logs/ollama.log
+cat /workspace/ai/logs/llama-server.log
 ```
 
 Check browser logs:
@@ -679,16 +692,16 @@ Check browser logs:
 cat /workspace/ai/logs/browser.log
 ```
 
-Check active Ollama models:
+Check llama.cpp OpenAI-compatible model endpoint:
 
 ```bash
-ollama ps
+curl http://127.0.0.1:8080/v1/models
 ```
 
-List local Ollama models:
+Check llama-server process:
 
 ```bash
-ollama list
+ps aux | grep llama-server | grep -v grep
 ```
 
 Check current config:
@@ -734,7 +747,7 @@ This restores:
 
 ```text
 /workspace/ai/ai.env
-/workspace/ai/ollama/models
+/workspace/ai/llama.cpp/models
 /workspace/ai/hermes
 /workspace/ai/opencode
 /workspace/projects
@@ -863,7 +876,7 @@ API keys
 browser cookies
 model files
 /workspace/ai/hermes/.env
-/workspace/ai/ollama/models
+/workspace/ai/llama.cpp/models
 ```
 
 Keep secrets in:
@@ -895,9 +908,8 @@ AI_CONTEXT_LENGTH="8192"
 Then:
 
 ```bash
+ai-llama-stop
 ai-pull
-ai-ollama-stop
-ai-ollama-start
 ```
 
 Use a Q4 model:
@@ -951,18 +963,18 @@ google-chrome --version
 
 ---
 
-## Ollama is not running
+## llama-server is not running
 
 Start it:
 
 ```bash
-ai-ollama-start
+ai-llama.cpp-start
 ```
 
 Check:
 
 ```bash
-curl http://127.0.0.1:11434/api/tags
+curl http://127.0.0.1:8080/v1/models
 ```
 
 ---
