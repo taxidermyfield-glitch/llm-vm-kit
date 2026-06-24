@@ -5,129 +5,91 @@ AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo 
 # shellcheck disable=SC1091
 source "$AI_STACK_DIR/lib/env.sh"
 
-# Derive model quant/file tag from AI_HF_MODEL every time.
-# This prevents stale AI_MODEL_QUANT values like Q4_K_M from breaking split GGUF repos.
-if [[ "${AI_HF_MODEL:-}" == *:* ]]; then
-  AI_MODEL_QUANT="${AI_HF_MODEL##*:}"
-  export AI_MODEL_QUANT
-fi
+ENV_FILE="${AI_ENV_FILE:-/workspace/ai/ai.env}"
+MODELS_ROOT="${AI_MODELS_DIR:-${AI_HOME:-/workspace/ai}/models}"
 
-
-export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
-
-raw="${AI_HF_MODEL#hf.co/}"
-raw="${raw#https://huggingface.co/}"
-
-repo="${raw%%:*}"
-tag="${raw#*:}"
-
-# If AI_HF_MODEL has no colon/tag, use AI_MODEL_QUANT.
-if [[ "$tag" == "$raw" ]]; then
-  tag="${AI_MODEL_QUANT:-Q4_K_M}"
-fi
-
-# Prefer explicit AI_MODEL_QUANT if set.
-quant="${AI_MODEL_QUANT:-$tag}"
-
-download_root="${AI_HOME}/models"
-mkdir -p "$download_root"
-
-echo "Hugging Face repo: $repo"
-echo "Requested quant/file: $quant"
-echo "Download root: $download_root"
-
-selected_file="$(
-python3 - "$repo" "$quant" <<'PY'
-import json
-import sys
-import urllib.request
-
-repo = sys.argv[1]
-quant = sys.argv[2]
-api = f"https://huggingface.co/api/models/{repo}"
-
-with urllib.request.urlopen(api, timeout=120) as r:
-    data = json.load(r)
-
-files = [
-    s.get("rfilename", "")
-    for s in data.get("siblings", [])
-    if s.get("rfilename", "").endswith(".gguf")
-]
-
-if not files:
-    print(f"No .gguf files found in {repo}", file=sys.stderr)
-    raise SystemExit(1)
-
-# If user supplied an exact GGUF filename, use it.
-if quant.endswith(".gguf"):
-    if quant in files:
-        print(quant)
-        raise SystemExit(0)
-    print(f"Exact GGUF file not found: {quant}", file=sys.stderr)
-    print("Available GGUF files:", file=sys.stderr)
-    for f in files:
-        print("  " + f, file=sys.stderr)
-    raise SystemExit(1)
-
-matches = [f for f in files if quant in f]
-
-if not matches:
-    print(f"No GGUF matching quant/tag '{quant}' found.", file=sys.stderr)
-    print("Available GGUF files:", file=sys.stderr)
-    for f in files:
-        print("  " + f, file=sys.stderr)
-    raise SystemExit(1)
-
-# Prefer a single-file GGUF. Avoid split files unless no single file exists.
-single = [f for f in matches if "split" not in f.lower() and "00001-of" not in f.lower()]
-chosen = single[0] if single else matches[0]
-print(chosen)
-PY
-)"
-
-echo "Selected GGUF file: $selected_file"
-
-echo "Downloading with hf download..."
-mkdir -p "$download_root/$repo"
-
-export HF_XET_HIGH_PERFORMANCE="${HF_XET_HIGH_PERFORMANCE:-1}"
-
-hf download "$repo" "$selected_file" \
-  --local-dir "$download_root/$repo"
-
-local_path="$download_root/$repo/$selected_file"
-
-if [[ ! -f "$local_path" ]]; then
-  echo "Download finished but file not found at expected path:" >&2
-  echo "$local_path" >&2
-  echo "Searching..." >&2
-  local_path="$(find "$download_root/$repo" -name "$(basename "$selected_file")" -type f | head -n 1 || true)"
-fi
-
-if [[ -z "${local_path:-}" || ! -f "$local_path" ]]; then
-  echo "ERROR: Could not locate downloaded GGUF file." >&2
+if ! command -v hf >/dev/null 2>&1; then
+  echo "hf command not found. Run bootstrap or install huggingface_hub[cli]." >&2
   exit 1
 fi
 
-echo "Downloaded local model:"
-ls -lh "$local_path"
+if [[ -z "${AI_HF_MODEL:-}" ]]; then
+  echo "AI_HF_MODEL is empty." >&2
+  exit 1
+fi
 
-# Persist local model path into env.
-python3 - "$AI_ENV_FILE" "$local_path" "$quant" <<'PY'
+model_ref="${AI_HF_MODEL#hf.co/}"
+
+if [[ "$model_ref" != *:* ]]; then
+  echo "AI_HF_MODEL must include a quant/tag after ':'" >&2
+  echo "Example: hf.co/owner/repo:UD-IQ2_M" >&2
+  exit 1
+fi
+
+repo="${model_ref%:*}"
+quant="${model_ref##*:}"
+
+# Always derive quant from AI_HF_MODEL so stale Q4_K_M does not break other repos.
+AI_MODEL_QUANT="$quant"
+export AI_MODEL_QUANT
+
+target_dir="${MODELS_ROOT}/${repo}"
+
+echo "Hugging Face repo: ${repo}"
+echo "Requested quant/file: ${quant}"
+echo "Download root: ${MODELS_ROOT}"
+echo "Target dir: ${target_dir}"
+
+mkdir -p "$target_dir"
+
+echo "Downloading all matching GGUF files for quant/tag '${quant}'..."
+hf download "$repo" \
+  --include "*${quant}*.gguf" \
+  --local-dir "$target_dir"
+
+mapfile -t first_splits < <(
+  find "$target_dir" -maxdepth 1 -type f -iname "*.gguf" -iname "*${quant}*" -iname "*00001-of-*.gguf" | sort
+)
+
+if [[ "${#first_splits[@]}" -gt 0 ]]; then
+  local_model="${first_splits[0]}"
+else
+  mapfile -t ggufs < <(
+    find "$target_dir" -maxdepth 1 -type f -iname "*.gguf" -iname "*${quant}*" | sort
+  )
+
+  if [[ "${#ggufs[@]}" -eq 0 ]]; then
+    echo "No local GGUF files matching quant/tag '${quant}' found after download." >&2
+    echo "Local files:" >&2
+    find "$target_dir" -maxdepth 1 -type f -iname "*.gguf" -printf "  %f\n" | sort >&2 || true
+    exit 1
+  fi
+
+  local_model="${ggufs[0]}"
+fi
+
+echo "Selected local model entrypoint:"
+echo "  ${local_model}"
+
+echo "Local GGUF files:"
+find "$target_dir" -maxdepth 1 -type f -iname "*.gguf" -printf "  %f\n" | sort
+
+python3 - "$ENV_FILE" "$AI_HF_MODEL" "$quant" "$local_model" <<'PY'
 from pathlib import Path
 import sys
 
-path = Path(sys.argv[1])
-local_model = sys.argv[2]
+env_path = Path(sys.argv[1])
+hf_model = sys.argv[2]
 quant = sys.argv[3]
+local_model = sys.argv[4]
 
 updates = {
-    "AI_LOCAL_MODEL": local_model,
+    "AI_HF_MODEL": hf_model,
     "AI_MODEL_QUANT": quant,
+    "AI_LOCAL_MODEL": local_model,
 }
 
-lines = path.read_text().splitlines() if path.exists() else []
+lines = env_path.read_text().splitlines() if env_path.exists() else []
 out = []
 seen = set()
 
@@ -143,8 +105,8 @@ for key, value in updates.items():
     if key not in seen:
         out.append(f'{key}="{value}"')
 
-path.write_text("\n".join(out) + "\n")
+env_path.write_text("\n".join(out) + "\n")
 PY
 
 echo "Updated env:"
-grep -E '^(AI_HF_MODEL|AI_MODEL_QUANT|AI_LOCAL_MODEL|AI_CONTEXT_LENGTH)=' "$AI_ENV_FILE" || true
+grep -E 'AI_HF_MODEL|AI_MODEL_QUANT|AI_LOCAL_MODEL|AI_CONTEXT_LENGTH' "$ENV_FILE" || true
