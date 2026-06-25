@@ -28,18 +28,15 @@ def ask(prompt: str) -> str:
         "max_tokens": 2048,
     }
 
-    data = json.dumps(payload).encode("utf-8")
-
     req = urllib.request.Request(
         f"{base_url}/chat/completions",
-        data=data,
+        data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
 
     with urllib.request.urlopen(req, timeout=900) as r:
-        raw = r.read().decode("utf-8")
-        obj = json.loads(raw)
+        obj = json.loads(r.read().decode("utf-8"))
 
     reply = obj["choices"][0]["message"]["content"]
     messages.append({"role": "assistant", "content": reply})
@@ -51,11 +48,12 @@ if args:
         print(ask(prompt))
     raise SystemExit(0)
 
-print("ai-chat connected to llama.cpp. Type /bye, /exit, quit, or Ctrl+C to exit.")
+print("ai-chat connected. No system prompt is being injected.")
+print("Type /bye, /exit, quit, or Ctrl+C to exit.")
 
 while True:
     try:
-        prompt = input("\nyou> ").strip()
+        prompt = input("\\nyou> ").strip()
     except KeyboardInterrupt:
         print()
         break
@@ -70,7 +68,7 @@ while True:
         break
 
     try:
-        print("\nai> " + ask(prompt))
+        print("\\nai> " + ask(prompt))
     except Exception as e:
-        print(f"\nerror: {e}", file=sys.stderr)
+        print(f"\\nerror: {e}", file=sys.stderr)
 ' "$AI_MODEL" "$(ai_openai_url)" "$@"
