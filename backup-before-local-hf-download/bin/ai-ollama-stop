@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-pkill -x ollama 2>/dev/null || true
-echo "Stopped Ollama if it was running."
