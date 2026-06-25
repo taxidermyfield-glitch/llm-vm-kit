@@ -61,7 +61,7 @@ if [[ ! -f "$AI_ENV_FILE" ]]; then
   $SUDO cp "$STACK_DIR/config/ai.env.example" "$AI_ENV_FILE"
 fi
 
-for key in AI_BACKEND AI_HF_MODEL AI_MODEL AI_CONTEXT_LENGTH AI_HOME AI_PROJECTS OLLAMA_MODELS AI_HERMES_HOME AI_OPENCODE_HOME OLLAMA_HOST AI_AGENT_TOOLSETS AI_TERMINAL_TIMEOUT AI_APPROVAL_MODE AI_BROWSER_CDP_URL AI_WEB_SEARCH_BACKEND AI_WEB_EXTRACT_BACKEND; do
+for key in AI_BACKEND AI_HF_MODEL AI_MODEL AI_CONTEXT_LENGTH AI_HOME AI_PROJECTS OLLAMA_MODELS AI_HERMES_HOME AI_OPENCODE_HOME OLLAMA_HOST AI_AGENT_TOOLSETS AI_TERMINAL_TIMEOUT AI_APPROVAL_MODE AI_BROWSER_CDP_URL AI_WEB_SEARCH_BACKEND AI_WEB_EXTRACT_BACKEND AI_SYNC_REMOTE_USER AI_SYNC_REMOTE_HOST AI_SYNC_REMOTE_PORT AI_SYNC_REMOTE_ROOT AI_SYNC_SSH_KEY AI_SYNC_LOCAL_ROOT AI_SYNC_AI_HOME AI_SYNC_DELETE AI_AUTO_SYNC_FROM_SERVER; do
   if [[ -n "${!key:-}" ]]; then
     set_env_value "$AI_ENV_FILE" "$key" "${!key}"
   fi
@@ -376,6 +376,14 @@ done
 
 hash -r
 
+if [[ "${AI_AUTO_SYNC_FROM_SERVER:-0}" == "1" ]]; then
+  echo "AI_AUTO_SYNC_FROM_SERVER=1; syncing persistent state from dedicated server..."
+  ai-sync-from-server
+  # ai-sync-from-server may replace ai.env with the persistent base config.
+  # shellcheck disable=SC1091
+  source "$STACK_DIR/lib/env.sh"
+fi
+
 echo "Configuring tools..."
 ai-configure
 
@@ -396,12 +404,15 @@ cat <<'MSG'
 Installed.
 
 Main commands:
-  ai-chat                 local chat through Ollama
+  ai-chat                 local chat through llama.cpp
   ai-code                 repo coding agent through OpenCode
   ai-agent                autonomous worker through Hermes
   ai-model                show or change the Hugging Face GGUF model
   ai-pull                 pull current HF model and rebuild local alias
-  ai-status               inspect GPU, tools, config, and Ollama state
+  ai-status               inspect GPU, tools, config, and llama.cpp state
+  ai-sync-from-server     pull persistent state from a dedicated server
+  ai-sync-to-server       push persistent state before VM disposal
+  ai-sync-status          dry-run sync differences
   ai-browser-start        optional local browser automation helper
   ai-backup               archive /workspace/ai and /workspace/projects
 

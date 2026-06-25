@@ -8,6 +8,7 @@ required=(
   bootstrap.sh
   install.sh
   lib/env.sh
+  lib/sync.sh
   config/ai.env.example
   bin/ai-chat
   bin/ai-code
@@ -15,6 +16,9 @@ required=(
   bin/ai-model
   bin/ai-pull
   bin/ai-status
+  bin/ai-sync-from-server
+  bin/ai-sync-to-server
+  bin/ai-sync-status
   bin/ai-configure
   bin/ai-ollama-start
   bin/ai-browser-start
@@ -34,7 +38,21 @@ python3 - <<'PY'
 from pathlib import Path
 
 text = Path("config/ai.env.example").read_text()
-required = ["AI_HF_MODEL=", "AI_MODEL=", "AI_CONTEXT_LENGTH=", "OLLAMA_MODELS="]
+required = [
+    "AI_HF_MODEL=",
+    "AI_MODEL=",
+    "AI_CONTEXT_LENGTH=",
+    "OLLAMA_MODELS=",
+    "AI_SYNC_REMOTE_USER=",
+    "AI_SYNC_REMOTE_HOST=",
+    "AI_SYNC_REMOTE_PORT=",
+    "AI_SYNC_REMOTE_ROOT=",
+    "AI_SYNC_SSH_KEY=",
+    "AI_SYNC_LOCAL_ROOT=",
+    "AI_SYNC_AI_HOME=",
+    "AI_SYNC_DELETE=",
+    "AI_AUTO_SYNC_FROM_SERVER=",
+]
 missing = [x for x in required if x not in text]
 if missing:
     raise SystemExit(f"Missing config keys: {missing}")

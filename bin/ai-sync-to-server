@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/sync.sh"
+
+ai_sync_init
+ai_sync_local_dirs
+
+if command -v pgrep >/dev/null 2>&1 && pgrep -f "llama-server.*--port ${AI_LLAMA_PORT}" >/dev/null 2>&1; then
+  echo "Warning: llama-server appears to be running. Consider ai-llama-stop before disposal sync." >&2
+fi
+
+echo "Preparing dedicated server: ${AI_SYNC_REMOTE}:${AI_SYNC_REMOTE_ROOT}"
+ai_sync_remote_dirs
+
+ai_sync_build_rsync_args "${AI_SYNC_DELETE:-0}"
+
+ai_sync_push_dir "$AI_SYNC_LOCAL_ROOT/projects" "projects"
+ai_sync_push_dir "$AI_SYNC_AI_HOME/datasets" "datasets"
+ai_sync_push_dir "$AI_SYNC_AI_HOME/outputs" "outputs"
+ai_sync_push_dir "$AI_SYNC_AI_HOME/opencode" "opencode"
+ai_sync_push_dir "$AI_SYNC_AI_HOME/hermes" "hermes"
+
+ai_sync_write_base_env "$AI_SYNC_AI_HOME/ai.env" "$AI_SYNC_AI_HOME/persistent-config/ai.env.base"
+ai_sync_push_dir "$AI_SYNC_AI_HOME/persistent-config" "config"
+
+"${AI_SYNC_SSH_CMD[@]}" "$AI_SYNC_REMOTE" "date -Is > '$AI_SYNC_REMOTE_ROOT/sync/last-sync-to-server.txt'"
+
+echo "Sync to server complete."

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/sync.sh"
+
+direction="${1:-to-server}"
+
+ai_sync_init
+ai_sync_build_rsync_args "${AI_SYNC_DELETE:-0}"
+AI_SYNC_RSYNC_ARGS=(-n --itemize-changes "${AI_SYNC_RSYNC_ARGS[@]}")
+
+echo "Dedicated server: ${AI_SYNC_REMOTE}:${AI_SYNC_REMOTE_ROOT}"
+echo "Mode: ${direction}"
+echo "Itemized rsync changes follow. No output under a path means no detected changes."
+echo
+
+case "$direction" in
+  to-server|push|upload)
+    ai_sync_validate_remote_root
+    ai_sync_push_dir "$AI_SYNC_LOCAL_ROOT/projects" "projects"
+    ai_sync_push_dir "$AI_SYNC_AI_HOME/datasets" "datasets"
+    ai_sync_push_dir "$AI_SYNC_AI_HOME/outputs" "outputs"
+    ai_sync_push_dir "$AI_SYNC_AI_HOME/opencode" "opencode"
+    ai_sync_push_dir "$AI_SYNC_AI_HOME/hermes" "hermes"
+
+    status_config_dir="$(mktemp -d)"
+    trap 'rm -rf "$status_config_dir"' EXIT
+    if [[ -d "$AI_SYNC_AI_HOME/persistent-config" ]]; then
+      rsync -a --exclude 'ai.env.base' "$AI_SYNC_AI_HOME/persistent-config/" "$status_config_dir/"
+    fi
+    ai_sync_write_base_env "$AI_SYNC_AI_HOME/ai.env" "$status_config_dir/ai.env.base"
+    ai_sync_push_dir "$status_config_dir" "config"
+    ;;
+  from-server|pull|download)
+    ai_sync_validate_remote_root
+    ai_sync_pull_dir "projects" "$AI_SYNC_LOCAL_ROOT/projects"
+    ai_sync_pull_dir "datasets" "$AI_SYNC_AI_HOME/datasets"
+    ai_sync_pull_dir "outputs" "$AI_SYNC_AI_HOME/outputs"
+    ai_sync_pull_dir "opencode" "$AI_SYNC_AI_HOME/opencode"
+    ai_sync_pull_dir "hermes" "$AI_SYNC_AI_HOME/hermes"
+    ai_sync_pull_dir "config" "$AI_SYNC_AI_HOME/persistent-config"
+    ;;
+  *)
+    echo "Usage: ai-sync-status [to-server|from-server]" >&2
+    exit 2
+    ;;
+esac

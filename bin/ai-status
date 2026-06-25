@@ -15,6 +15,8 @@ echo "  AI_OPENAI_BASE_URL: $(ai_openai_url)"
 echo "  AI_HOME:            $AI_HOME"
 echo "  AI_PROJECTS:        $AI_PROJECTS"
 echo "  HERMES_HOME:        $AI_HERMES_HOME"
+echo "  AI_SYNC_REMOTE:     ${AI_SYNC_REMOTE_USER:-unset}@${AI_SYNC_REMOTE_HOST:-unset}"
+echo "  AI_SYNC_ROOT:       $AI_SYNC_REMOTE_ROOT"
 echo
 
 echo "GPU:"
@@ -26,7 +28,7 @@ fi
 echo
 
 echo "Tools:"
-for cmd in llama-server opencode hermes ai-chat ai-code ai-agent ai-model ai-pull ai-llama-start ai-llama-stop; do
+for cmd in llama-server opencode hermes ai-chat ai-code ai-agent ai-model ai-pull ai-sync-from-server ai-sync-to-server ai-sync-status ai-llama-start ai-llama-stop; do
   printf "  %-18s " "$cmd"
   command -v "$cmd" || true
 done

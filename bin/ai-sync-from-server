@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/sync.sh"
+
+ai_sync_init
+ai_sync_local_dirs
+
+echo "Checking dedicated server: ${AI_SYNC_REMOTE}:${AI_SYNC_REMOTE_ROOT}"
+ai_sync_validate_remote_root
+
+ai_sync_build_rsync_args 0
+
+ai_sync_pull_dir "projects" "$AI_SYNC_LOCAL_ROOT/projects"
+ai_sync_pull_dir "datasets" "$AI_SYNC_AI_HOME/datasets"
+ai_sync_pull_dir "outputs" "$AI_SYNC_AI_HOME/outputs"
+ai_sync_pull_dir "opencode" "$AI_SYNC_AI_HOME/opencode"
+ai_sync_pull_dir "hermes" "$AI_SYNC_AI_HOME/hermes"
+ai_sync_pull_dir "config" "$AI_SYNC_AI_HOME/persistent-config"
+
+if [[ -f "$AI_SYNC_AI_HOME/persistent-config/ai.env.base" ]]; then
+  echo "Installing persistent base config into $AI_SYNC_AI_HOME/ai.env"
+  cp "$AI_SYNC_AI_HOME/persistent-config/ai.env.base" "$AI_SYNC_AI_HOME/ai.env"
+fi
+
+ai_sync_strip_local_model "$AI_SYNC_AI_HOME/ai.env"
+mkdir -p "$AI_SYNC_AI_HOME/models" "$AI_SYNC_AI_HOME/llama-cache"
+
+if command -v ai-configure >/dev/null 2>&1; then
+  ai-configure || true
+fi
+
+echo "Sync from server complete."
