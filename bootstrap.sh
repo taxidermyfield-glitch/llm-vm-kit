@@ -6,6 +6,11 @@ export DEBIAN_FRONTEND=noninteractive
 STACK_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 AI_HOME="${AI_HOME:-/workspace/ai}"
 AI_ENV_FILE="${AI_ENV_FILE:-$AI_HOME/ai.env}"
+AI_REQUIRE_SYNC_CONFIG="${AI_REQUIRE_SYNC_CONFIG:-1}"
+
+if [[ "$AI_REQUIRE_SYNC_CONFIG" == "1" ]]; then
+  AI_AUTO_SYNC_FROM_SERVER="1"
+fi
 
 if [[ "$(id -u)" -eq 0 ]]; then
   SUDO=""
@@ -58,14 +63,22 @@ $SUDO mkdir -p "$AI_HOME" /workspace/projects /etc/ai-stack
 echo "$STACK_DIR" | $SUDO tee /etc/ai-stack/stack-dir >/dev/null
 
 if [[ ! -f "$AI_ENV_FILE" ]]; then
-  $SUDO cp "$STACK_DIR/config/ai.env.example" "$AI_ENV_FILE"
+  if [[ "$AI_REQUIRE_SYNC_CONFIG" == "1" ]]; then
+    echo "No local $AI_ENV_FILE found; dedicated-server sync is required to provide config."
+  else
+    $SUDO cp "$STACK_DIR/config/ai.env.example" "$AI_ENV_FILE"
+  fi
 fi
 
-for key in AI_BACKEND AI_HF_MODEL AI_MODEL AI_CONTEXT_LENGTH AI_HOME AI_PROJECTS OLLAMA_MODELS AI_HERMES_HOME AI_OPENCODE_HOME OLLAMA_HOST AI_AGENT_TOOLSETS AI_TERMINAL_TIMEOUT AI_APPROVAL_MODE AI_BROWSER_CDP_URL AI_WEB_SEARCH_BACKEND AI_WEB_EXTRACT_BACKEND AI_SYNC_REMOTE_USER AI_SYNC_REMOTE_HOST AI_SYNC_REMOTE_PORT AI_SYNC_REMOTE_ROOT AI_SYNC_SSH_KEY AI_SYNC_LOCAL_ROOT AI_SYNC_AI_HOME AI_SYNC_DELETE AI_AUTO_SYNC_FROM_SERVER; do
-  if [[ -n "${!key:-}" ]]; then
-    set_env_value "$AI_ENV_FILE" "$key" "${!key}"
-  fi
-done
+if [[ -f "$AI_ENV_FILE" || "$AI_REQUIRE_SYNC_CONFIG" != "1" ]]; then
+  for key in AI_BACKEND AI_HF_MODEL AI_MODEL AI_CONTEXT_LENGTH AI_HOME AI_PROJECTS OLLAMA_MODELS AI_HERMES_HOME AI_OPENCODE_HOME OLLAMA_HOST AI_AGENT_TOOLSETS AI_TERMINAL_TIMEOUT AI_APPROVAL_MODE AI_BROWSER_CDP_URL AI_WEB_SEARCH_BACKEND AI_WEB_EXTRACT_BACKEND AI_SYNC_REMOTE_USER AI_SYNC_REMOTE_HOST AI_SYNC_REMOTE_PORT AI_SYNC_REMOTE_ROOT AI_SYNC_SSH_KEY AI_SYNC_LOCAL_ROOT AI_SYNC_AI_HOME AI_SYNC_DELETE AI_AUTO_SYNC_FROM_SERVER AI_REQUIRE_SYNC_CONFIG; do
+    if [[ -n "${!key:-}" ]]; then
+      set_env_value "$AI_ENV_FILE" "$key" "${!key}"
+    fi
+  done
+else
+  echo "Not creating $AI_ENV_FILE from environment overrides; sync must supply it."
+fi
 
 $SUDO ln -sf "$AI_ENV_FILE" /etc/ai-stack/ai.env
 
@@ -382,6 +395,23 @@ if [[ "${AI_AUTO_SYNC_FROM_SERVER:-0}" == "1" ]]; then
   # ai-sync-from-server may replace ai.env with the persistent base config.
   # shellcheck disable=SC1091
   source "$STACK_DIR/lib/env.sh"
+
+  if [[ "${AI_REQUIRE_SYNC_CONFIG:-1}" == "1" && ! -f "$AI_ENV_FILE" ]]; then
+    echo "Required sync did not create $AI_ENV_FILE." >&2
+    echo "Create $AI_SYNC_REMOTE_ROOT/config/ai.env.base on the dedicated server and rerun bootstrap." >&2
+    exit 1
+  fi
+
+  $SUDO mkdir -p "$AI_HOME" "$AI_PROJECTS" "$AI_HERMES_HOME" "$AI_OPENCODE_HOME" "$AI_HOME/logs"
+  touch "$AI_HERMES_HOME/.env"
+  chmod 600 "$AI_HERMES_HOME/.env" || true
+
+  if [[ "$RUN_USER" != "root" ]]; then
+    $SUDO chown -R "$RUN_USER:$RUN_GROUP" "$AI_HOME" "$AI_PROJECTS" || true
+  fi
+elif [[ "${AI_REQUIRE_SYNC_CONFIG:-1}" == "1" ]]; then
+  echo "AI_REQUIRE_SYNC_CONFIG=1 requires a successful ai-sync-from-server before model pull." >&2
+  exit 1
 fi
 
 echo "Configuring tools..."

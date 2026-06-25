@@ -28,7 +28,7 @@ fi
 ai_sync_strip_local_model "$AI_SYNC_AI_HOME/ai.env"
 mkdir -p "$AI_SYNC_AI_HOME/models" "$AI_SYNC_AI_HOME/llama-cache"
 
-if command -v ai-configure >/dev/null 2>&1; then
+if command -v ai-configure >/dev/null 2>&1 && { [[ -f "$AI_SYNC_AI_HOME/ai.env" ]] || [[ "${AI_REQUIRE_SYNC_CONFIG:-0}" != "1" ]]; }; then
   ai-configure || true
 fi
 

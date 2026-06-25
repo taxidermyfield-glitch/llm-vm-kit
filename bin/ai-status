@@ -17,6 +17,7 @@ echo "  AI_PROJECTS:        $AI_PROJECTS"
 echo "  HERMES_HOME:        $AI_HERMES_HOME"
 echo "  AI_SYNC_REMOTE:     ${AI_SYNC_REMOTE_USER:-unset}@${AI_SYNC_REMOTE_HOST:-unset}"
 echo "  AI_SYNC_ROOT:       $AI_SYNC_REMOTE_ROOT"
+echo "  AI_REQUIRE_SYNC:    $AI_REQUIRE_SYNC_CONFIG"
 echo
 
 echo "GPU:"

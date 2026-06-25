@@ -52,6 +52,7 @@ required = [
     "AI_SYNC_AI_HOME=",
     "AI_SYNC_DELETE=",
     "AI_AUTO_SYNC_FROM_SERVER=",
+    "AI_REQUIRE_SYNC_CONFIG=",
 ]
 missing = [x for x in required if x not in text]
 if missing:
