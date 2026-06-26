@@ -2,12 +2,26 @@
 set -euo pipefail
 
 AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
-AI_ENV_FILE="${AI_ENV_FILE:-/etc/ai-stack/ai.env}"
+if [[ -z "${AI_ENV_FILE:-}" ]]; then
+  if [[ -f /etc/ai-stack/ai.env ]]; then
+    AI_ENV_FILE="/etc/ai-stack/ai.env"
+  else
+    AI_ENV_FILE="/workspace/ai/ai.env"
+  fi
+fi
+AI_SYNC_ENV_FILE="${AI_SYNC_ENV_FILE:-$AI_STACK_DIR/config/ai-sync.env}"
 
 if [[ -f "$AI_ENV_FILE" ]]; then
   set -a
   # shellcheck disable=SC1090
   source "$AI_ENV_FILE"
+  set +a
+fi
+
+if [[ -f "$AI_SYNC_ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$AI_SYNC_ENV_FILE"
   set +a
 fi
 
@@ -26,6 +40,8 @@ fi
 : "${OLLAMA_MODELS:=$AI_HOME/ollama/models}"
 : "${AI_SYSTEM_PROMPT_FILE:=$AI_HOME/persistent-config/system-prompt.txt}"
 : "${AI_SYSTEM_PROMPT:=}"
+: "${AI_MEMORY_DIR:=$AI_HOME/persistent-config/memory}"
+: "${AI_MEMORY_FILE:=$AI_MEMORY_DIR/active.md}"
 
 : "${AI_SYNC_REMOTE_USER:=}"
 : "${AI_SYNC_REMOTE_HOST:=}"
@@ -35,7 +51,6 @@ fi
 : "${AI_SYNC_LOCAL_ROOT:=/workspace}"
 : "${AI_SYNC_AI_HOME:=$AI_HOME}"
 : "${AI_SYNC_DELETE:=0}"
-: "${AI_AUTO_SYNC_FROM_SERVER:=0}"
 : "${AI_REQUIRE_SYNC_CONFIG:=1}"
 
 : "${AI_LLAMA_HOST:=127.0.0.1}"
@@ -58,12 +73,12 @@ fi
 : "${AI_WEB_SEARCH_BACKEND:=ddgs}"
 : "${AI_WEB_EXTRACT_BACKEND:=}"
 
-export AI_STACK_DIR AI_ENV_FILE
+export AI_STACK_DIR AI_ENV_FILE AI_SYNC_ENV_FILE
 export AI_MODEL_PRESET AI_BACKEND AI_HF_MODEL AI_LOCAL_MODEL AI_MODEL_QUANT AI_MODEL AI_CONTEXT_LENGTH
 export AI_HOME AI_PROJECTS AI_HERMES_HOME AI_OPENCODE_HOME OLLAMA_MODELS
-export AI_SYSTEM_PROMPT_FILE AI_SYSTEM_PROMPT
+export AI_SYSTEM_PROMPT_FILE AI_SYSTEM_PROMPT AI_MEMORY_DIR AI_MEMORY_FILE
 export AI_SYNC_REMOTE_USER AI_SYNC_REMOTE_HOST AI_SYNC_REMOTE_PORT AI_SYNC_REMOTE_ROOT AI_SYNC_SSH_KEY
-export AI_SYNC_LOCAL_ROOT AI_SYNC_AI_HOME AI_SYNC_DELETE AI_AUTO_SYNC_FROM_SERVER AI_REQUIRE_SYNC_CONFIG
+export AI_SYNC_LOCAL_ROOT AI_SYNC_AI_HOME AI_SYNC_DELETE AI_REQUIRE_SYNC_CONFIG
 export AI_LLAMA_HOST AI_LLAMA_PORT AI_OPENAI_BASE_URL AI_LLAMA_NGL AI_LLAMA_SPLIT_MODE AI_LLAMA_EXTRA_ARGS
 export AI_VLLM_TENSOR_PARALLEL_SIZE AI_VLLM_DTYPE AI_VLLM_GPU_MEMORY_UTILIZATION AI_VLLM_EXTRA_ARGS
 export AI_AUTO_BROWSER AI_BROWSER_CDP_URL AI_AGENT_TOOLSETS AI_TERMINAL_TIMEOUT AI_APPROVAL_MODE

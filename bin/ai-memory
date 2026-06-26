@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/env.sh"
+
+memory_file="${AI_MEMORY_FILE:-$AI_HOME/persistent-config/memory/active.md}"
+
+usage() {
+  cat <<'MSG'
+Usage:
+  ai-memory
+  ai-memory show
+  ai-memory add "Models are VM-local and should not be synced."
+  printf '%s\n' "User prefers concise answers." | ai-memory add
+  ai-memory edit
+  ai-memory edit 2 "Updated memory text."
+  ai-memory remove 2
+  ai-memory clear
+  ai-memory path
+
+Memory is manual and persistent. It is synced through /workspace/ai/persistent-config.
+MSG
+}
+
+ensure_memory_file() {
+  mkdir -p "$(dirname "$memory_file")"
+  if [[ ! -f "$memory_file" ]]; then
+    cat > "$memory_file" <<'EOF_MEMORY'
+# Shared Memory
+
+EOF_MEMORY
+  fi
+  chmod 600 "$memory_file" || true
+}
+
+count_items() {
+  awk '/^- / { count++ } END { print count + 0 }' "$memory_file"
+}
+
+show_memory() {
+  ensure_memory_file
+  echo "Shared memory: $memory_file"
+  echo
+  if ! awk '
+    /^- / {
+      count++
+      text = $0
+      sub(/^- /, "", text)
+      printf "%d. %s\n", count, text
+    }
+    END {
+      if (count == 0) exit 1
+    }
+  ' "$memory_file"; then
+    echo "No shared memory set."
+  fi
+}
+
+read_memory_text() {
+  if [[ $# -gt 0 ]]; then
+    printf '%s\n' "$*"
+  else
+    if [[ -t 0 ]]; then
+      echo "Enter memory text, then press Ctrl+D:" >&2
+    fi
+    cat
+  fi
+}
+
+add_memory() {
+  ensure_memory_file
+  local text
+  text="$(read_memory_text "$@" | sed 's/\r$//' | awk 'NF { print }')"
+
+  if [[ -z "$text" ]]; then
+    echo "No memory text provided." >&2
+    exit 1
+  fi
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    printf -- '- %s\n' "$line" >> "$memory_file"
+  done <<< "$text"
+
+  echo "Added shared memory."
+}
+
+validate_index() {
+  local idx="$1"
+  local total
+  total="$(count_items)"
+
+  [[ "$idx" =~ ^[0-9]+$ ]] || { echo "Memory index must be a number." >&2; exit 1; }
+  [[ "$idx" -ge 1 && "$idx" -le "$total" ]] || {
+    echo "Memory index $idx not found. Current item count: $total" >&2
+    exit 1
+  }
+}
+
+edit_memory() {
+  ensure_memory_file
+
+  if [[ $# -eq 0 ]]; then
+    editor="${EDITOR:-}"
+    if [[ -z "$editor" ]]; then
+      if command -v nano >/dev/null 2>&1; then
+        editor="nano"
+      else
+        editor="vi"
+      fi
+    fi
+    exec "$editor" "$memory_file"
+  fi
+
+  local idx="$1"
+  shift
+  validate_index "$idx"
+
+  local replacement
+  replacement="$(read_memory_text "$@" | sed 's/\r$//' | awk 'NF { print; exit }')"
+
+  if [[ -z "$replacement" ]]; then
+    echo "Replacement memory text is empty." >&2
+    exit 1
+  fi
+
+  local tmp
+  tmp="$(mktemp)"
+  awk -v target="$idx" -v replacement="$replacement" '
+    /^- / {
+      count++
+      if (count == target) {
+        print "- " replacement
+        next
+      }
+    }
+    { print }
+  ' "$memory_file" > "$tmp"
+  mv "$tmp" "$memory_file"
+  echo "Edited shared memory item $idx."
+}
+
+remove_memory() {
+  ensure_memory_file
+  local idx="${1:-}"
+  [[ -n "$idx" ]] || { echo "Usage: ai-memory remove NUMBER" >&2; exit 1; }
+  validate_index "$idx"
+
+  local tmp
+  tmp="$(mktemp)"
+  awk -v target="$idx" '
+    /^- / {
+      count++
+      if (count == target) next
+    }
+    { print }
+  ' "$memory_file" > "$tmp"
+  mv "$tmp" "$memory_file"
+  echo "Removed shared memory item $idx."
+}
+
+clear_memory() {
+  ensure_memory_file
+  cat > "$memory_file" <<'EOF_MEMORY'
+# Shared Memory
+
+EOF_MEMORY
+  echo "Cleared shared memory."
+}
+
+cmd="${1:-show}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
+
+case "$cmd" in
+  show|list|ls)
+    show_memory
+    ;;
+  add|remember)
+    add_memory "$@"
+    ;;
+  edit)
+    edit_memory "$@"
+    ;;
+  remove|rm|delete|forget)
+    remove_memory "$@"
+    ;;
+  clear)
+    clear_memory
+    ;;
+  path)
+    ensure_memory_file
+    echo "$memory_file"
+    ;;
+  help|--help|-h)
+    usage
+    ;;
+  *)
+    echo "Unknown ai-memory command: $cmd" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

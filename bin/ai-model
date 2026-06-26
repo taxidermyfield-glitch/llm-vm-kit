@@ -7,7 +7,7 @@ source "$AI_STACK_DIR/lib/env.sh"
 
 ENV_FILE="$AI_ENV_FILE"
 yes=0
-run_pull=1
+run_pull=0
 custom_backend=""
 args=()
 
@@ -20,14 +20,16 @@ Usage:
   ai-model hermes-405b
   ai-model max-power
   ai-model https://huggingface.co/NousResearch/Hermes-3-Llama-3.1-405B
-  ai-model --env-file /srv/ai-persistent/config/ai.env.base hermes-405b --no-pull
+  ai-model max-power --pull
+  ai-model --env-file /srv/ai-persistent/config/ai.env.base hermes-405b
   ai-model hf.co/OWNER/GGUF-REPO:Q4_K_M
   ai-model --backend vllm OWNER/REPO
 
 Options:
   --env-file FILE   update a specific env file
   --backend NAME    custom model backend: llamacpp or vllm
-  --no-pull         update config only; do not restart/download the model
+  --pull, --apply   after updating active config, restart/download the selected model
+  --no-pull         compatibility alias; config-only is already the default
   -y, --yes         accept large-model warnings
 MSG
 }
@@ -67,6 +69,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-pull)
       run_pull=0
+      shift
+      ;;
+    --pull|--apply)
+      run_pull=1
       shift
       ;;
     --yes|-y)
@@ -233,6 +239,9 @@ PY
 echo "Cleared stale AI_LOCAL_MODEL"
 
 if [[ "$ENV_FILE" != "$AI_ENV_FILE" ]]; then
+  if [[ "$run_pull" == "1" ]]; then
+    echo "Not pulling because --env-file targets $ENV_FILE instead of active $AI_ENV_FILE." >&2
+  fi
   run_pull=0
 fi
 
@@ -240,5 +249,5 @@ if [[ "$run_pull" == "1" ]]; then
   ai-server-stop 2>/dev/null || true
   ai-pull
 else
-  echo "Skipped model pull/start. Run ai-pull on the VM after syncing this config."
+  echo "Updated config only. Run ai-pull or ai-model ${selection} --pull when ready to download/start the model."
 fi

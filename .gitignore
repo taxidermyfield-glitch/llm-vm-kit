@@ -1,5 +1,6 @@
 .env
 *.env
+config/ai-sync.env
 *.log
 *.tgz
 *.tar.gz

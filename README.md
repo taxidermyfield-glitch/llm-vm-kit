@@ -25,7 +25,7 @@ Rent a fresh CUDA VM
 ```
 
 
-In the default sync-required mode, `run bootstrap.sh` means running it with the private sync key already installed and the dedicated-server connection variables supplied.
+In the default sync-required mode, run `bin/ai-sync-from-server` first, then run `bootstrap.sh`. Bootstrap does not run sync.
 
 > Current backend: this toolkit uses `llama.cpp` / `llama-server` by default, not Ollama. `llama-server` exposes a local OpenAI-compatible endpoint at `http://127.0.0.1:18080/v1`.
 
@@ -40,10 +40,10 @@ This project gives you a repeatable local-AI machine setup.
 Instead of manually setting up llama.cpp, OpenCode, Hermes, browser automation, model paths, configs, and shell commands every time you rent a GPU VM, this repo does it with one installer:
 
 ```bash
-sudo AI_SYNC_REMOTE_USER="user" \
-     AI_SYNC_REMOTE_HOST="DEDICATED_IP" \
-     AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519" \
-     bash bootstrap.sh
+cp config/ai-sync.env.example config/ai-sync.env
+nano config/ai-sync.env
+bin/ai-sync-from-server
+sudo bash bootstrap.sh
 ```
 
 After installation, these commands are available globally:
@@ -60,6 +60,7 @@ ai-server-stop
 ai-vllm-start
 ai-vllm-stop
 set-system-prompt
+ai-memory
 ai-sync-from-server
 ai-sync-to-server
 ai-sync-status
@@ -162,7 +163,7 @@ Install basic tools:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git curl ca-certificates
+sudo apt-get install -y git curl ca-certificates rsync openssh-client
 ```
 
 Clone this repo:
@@ -180,32 +181,70 @@ nano ~/.ssh/ai_sync_ed25519
 chmod 600 ~/.ssh/ai_sync_ed25519
 ```
 
-Run the installer with dedicated-server sync settings:
+Configure the local-only sync env in the cloned repo:
 
 ```bash
-sudo AI_SYNC_REMOTE_USER="user" \
-     AI_SYNC_REMOTE_HOST="DEDICATED_IP" \
-     AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519" \
-     bash bootstrap.sh
+cp config/ai-sync.env.example config/ai-sync.env
+nano config/ai-sync.env
 ```
 
-This will:
+Example `config/ai-sync.env`:
+
+```bash
+AI_SYNC_REMOTE_USER="user"
+AI_SYNC_REMOTE_HOST="DEDICATED_IP"
+AI_SYNC_REMOTE_PORT="22"
+AI_SYNC_REMOTE_ROOT="/srv/ai-persistent"
+AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519"
+AI_SYNC_LOCAL_ROOT="/workspace"
+AI_SYNC_AI_HOME="/workspace/ai"
+AI_SYNC_DELETE="0"
+```
+
+Pull current projects/config/memory/output state from dedicated storage:
+
+```bash
+bin/ai-sync-from-server
+```
+
+This creates `/workspace/ai/ai.env` from `/srv/ai-persistent/config/ai.env.base` and removes any stale `AI_LOCAL_MODEL`, because the local model path belongs only to the current GPU VM.
+
+Optional: change the preset before downloading any model:
+
+```bash
+bin/ai-model mid-range
+# or
+bin/ai-model max-power
+```
+
+If you changed the preset and want dedicated storage to remember it for future VMs:
+
+```bash
+bin/ai-sync-to-server
+```
+
+Now run bootstrap:
+
+```bash
+sudo bash bootstrap.sh
+```
+
+Bootstrap does not run sync. It expects `/workspace/ai/ai.env` to already exist. It will:
 
 ```text
 install system packages
 install Node.js
-install llama.cpp
+install the selected model backend requirements
 install OpenCode
 install Hermes Agent
 install Google Chrome for browser automation
 install the ai-* commands into /usr/local/bin
-sync /workspace/ai/ai.env from /srv/ai-persistent/config/ai.env.base
-start llama-server
-download/cache the configured Hugging Face model with llama.cpp or vLLM
+download/cache the configured Hugging Face model locally
+start the configured OpenAI-compatible model server
 serve the model through a local OpenAI-compatible endpoint using the model name local-ai
 ```
 
-By default, bootstrap requires dedicated-server sync config. It will not create `/workspace/ai/ai.env` from the repo example unless you explicitly opt out:
+By default, bootstrap requires synced config. It will not create `/workspace/ai/ai.env` from the repo example unless you explicitly opt out:
 
 ```bash
 sudo AI_REQUIRE_SYNC_CONFIG=0 bash bootstrap.sh
@@ -225,11 +264,8 @@ Model downloads can take a while. To test the installer quickly without pulling 
 
 ```bash
 cd /opt/llm-vm-kit
-sudo AI_SKIP_PULL=1 \
-     AI_SYNC_REMOTE_USER="user" \
-     AI_SYNC_REMOTE_HOST="DEDICATED_IP" \
-     AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519" \
-     bash bootstrap.sh
+bin/ai-sync-from-server
+sudo AI_SKIP_PULL=1 bash bootstrap.sh
 ```
 
 Then later pull the model:
@@ -242,7 +278,7 @@ ai-pull
 
 # 6. Install with a custom model immediately
 
-In sync-required mode, set the model in the dedicated server base config before creating the VM.
+In sync-required mode, model presets come from dedicated storage, but you can switch them on a fresh VM before bootstrap downloads any model.
 
 Built-in presets:
 
@@ -251,30 +287,32 @@ llama-3.3-70b   mid-range default, llama.cpp + GGUF, 32K context
 hermes-405b     max-power default, vLLM + full BF16 safetensors, 32K context preset, 128K architecture support
 ```
 
-Switch the persistent default to Hermes 405B before creating a fresh VM:
+After `bin/ai-sync-from-server`, switch the local synced config to Hermes 405B before bootstrap:
 
 ```bash
-AI_STACK_DIR=/opt/llm-vm-kit \
-AI_ENV_FILE=/srv/ai-persistent/config/ai.env.base \
-/opt/llm-vm-kit/bin/ai-model hermes-405b --no-pull
+bin/ai-model hermes-405b
 ```
 
 That command prints a hardware warning and asks you to type `405B` before changing the config.
 
 The `hermes-405b` preset is intentionally the maximum-power option. The Hugging Face model card lists BF16 tensors and says the model needs over 800GB of VRAM to load before KV cache, runtime overhead, long-context memory, or batching. Use it only on a very large multi-GPU or multi-node VM.
 
-Switch back to the normal 70B default:
+Switch back to the normal 70B default before bootstrap:
 
 ```bash
-AI_STACK_DIR=/opt/llm-vm-kit \
-AI_ENV_FILE=/srv/ai-persistent/config/ai.env.base \
-/opt/llm-vm-kit/bin/ai-model llama-3.3-70b --no-pull
+bin/ai-model llama-3.3-70b
 ```
 
-You can also edit the base config manually:
+Persist the preset choice back to dedicated storage so future VMs inherit it:
 
 ```bash
-nano /srv/ai-persistent/config/ai.env.base
+bin/ai-sync-to-server
+```
+
+You can also edit the synced config manually:
+
+```bash
+nano /workspace/ai/ai.env
 ```
 
 70B default values:
@@ -349,6 +387,7 @@ AI_MODEL="local-ai"
 AI_CONTEXT_LENGTH="32768"
 AI_OPENAI_BASE_URL="http://127.0.0.1:18080/v1"
 AI_SYSTEM_PROMPT_FILE="/workspace/ai/persistent-config/system-prompt.txt"
+AI_MEMORY_FILE="/workspace/ai/persistent-config/memory/active.md"
 AI_AUTO_BROWSER="1"
 AI_BROWSER_CDP_URL="http://127.0.0.1:9222"
 ```
@@ -362,6 +401,7 @@ AI_HF_MODEL         Hugging Face model to serve
 AI_MODEL            model name exposed to OpenAI-compatible clients
 AI_CONTEXT_LENGTH   context window size
 AI_SYSTEM_PROMPT_FILE persistent system prompt file used by ai-chat
+AI_MEMORY_FILE      manual shared memory file loaded by ai-chat
 AI_AUTO_BROWSER     whether ai-agent auto-starts headless Chrome
 AI_BROWSER_CDP_URL  local Chrome DevTools browser endpoint
 ```
@@ -536,7 +576,7 @@ ai-model hf.co/OWNER/GGUF-REPO:Q4_K_M
 ai-model --backend vllm OWNER/REPO
 ```
 
-This updates `/workspace/ai/ai.env`, stops the old server, and starts the selected backend unless `--no-pull` is used.
+This updates `/workspace/ai/ai.env` and clears stale `AI_LOCAL_MODEL`. Run `ai-pull` afterward when you are ready to download/start the selected backend, or use `ai-model MODEL --pull`.
 
 ## Method 2: edit manually
 
@@ -669,6 +709,33 @@ set-system-prompt --clear
 ```
 
 The prompt is stored at `/workspace/ai/persistent-config/system-prompt.txt`, so `ai-sync-to-server` persists it.
+
+---
+
+## ai-memory
+
+Manage manual shared memory loaded by `ai-chat`:
+
+```bash
+ai-memory add "Models are VM-local and should not be synced."
+ai-memory show
+ai-memory edit 1 "Models are VM-local; never sync model weights."
+ai-memory remove 1
+```
+
+Open the memory file in your editor:
+
+```bash
+ai-memory edit
+```
+
+The active memory file is:
+
+```text
+/workspace/ai/persistent-config/memory/active.md
+```
+
+It is deliberately manual. `ai-chat` reads it at startup and injects it as user-approved durable context; `ai-sync-to-server` persists it.
 
 ---
 
@@ -888,7 +955,21 @@ Do not include `AI_LOCAL_MODEL` in `ai.env.base`; that path belongs to the curre
 
 ## Vast VM sync config
 
-For bootstrap, pass the connection settings as environment variables. After bootstrap, the synced `/workspace/ai/ai.env` can also contain these values for future sync commands:
+The sync connection settings live in a local-only repo file:
+
+```bash
+/opt/llm-vm-kit/config/ai-sync.env
+```
+
+Create it from the example:
+
+```bash
+cd /opt/llm-vm-kit
+cp config/ai-sync.env.example config/ai-sync.env
+nano config/ai-sync.env
+```
+
+Example:
 
 ```bash
 AI_SYNC_REMOTE_USER="user"
@@ -899,9 +980,9 @@ AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519"
 AI_SYNC_LOCAL_ROOT="/workspace"
 AI_SYNC_AI_HOME="/workspace/ai"
 AI_SYNC_DELETE="0"
-AI_AUTO_SYNC_FROM_SERVER="1"
-AI_REQUIRE_SYNC_CONFIG="1"
 ```
+
+Do not put these SSH connection settings in `/srv/ai-persistent/config/ai.env.base`. They are local to each VM.
 
 Install the SSH key on the VM:
 
@@ -922,10 +1003,12 @@ ssh -i ~/.ssh/ai_sync_ed25519 user@DEDICATED_IP 'echo connected'
 Pull persistent state onto a new VM:
 
 ```bash
-ai-sync-from-server
+bin/ai-sync-from-server
 ```
 
 This pulls projects, datasets, outputs, OpenCode state, Hermes state, and config. If `/srv/ai-persistent/config/ai.env.base` exists, it is copied to `/workspace/ai/ai.env`, then any stale `AI_LOCAL_MODEL` line is removed.
+
+Before bootstrap, run sync commands as `bin/ai-sync-*` from the cloned repo. After bootstrap, they are installed globally as `ai-sync-*`.
 
 Push persistent state before destroying a VM:
 
@@ -998,20 +1081,48 @@ target/
 *.bin
 ```
 
-Models are large, redownloadable, and faster from local VM disk. Bootstrap now syncs config first and then runs `ai-pull`, so the model is pulled from the dedicated server's settings.
+Models are large, redownloadable, and faster from local VM disk. Sync pulls the model preset/config first; bootstrap later runs `ai-pull` and downloads the selected model locally.
 
 ## New Vast VM workflow
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y git curl ca-certificates rsync openssh-client
+
+mkdir -p ~/.ssh
+nano ~/.ssh/ai_sync_ed25519
+chmod 600 ~/.ssh/ai_sync_ed25519
+
 git clone https://github.com/YOUR_USERNAME/llm-vm-kit.git /opt/llm-vm-kit
 cd /opt/llm-vm-kit
-sudo AI_SYNC_REMOTE_USER="user" \
-     AI_SYNC_REMOTE_HOST="DEDICATED_IP" \
-     AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519" \
-     bash bootstrap.sh
+
+cp config/ai-sync.env.example config/ai-sync.env
+nano config/ai-sync.env
+
+bin/ai-sync-from-server
 ```
 
-In the default mode, bootstrap refuses to create `/workspace/ai/ai.env` from the repo. It installs the tools, runs `ai-sync-from-server`, requires `/srv/ai-persistent/config/ai.env.base` to produce `/workspace/ai/ai.env`, then pulls the configured model.
+Optionally switch presets before any model download:
+
+```bash
+bin/ai-model mid-range
+# or
+bin/ai-model max-power
+```
+
+If you changed presets, persist that selected preset back to dedicated storage:
+
+```bash
+bin/ai-sync-to-server
+```
+
+Then install dependencies and pull/start the selected model:
+
+```bash
+sudo bash bootstrap.sh
+```
+
+Bootstrap does not run sync. It requires `/workspace/ai/ai.env` to already exist from `bin/ai-sync-from-server`.
 
 ## Delete policy
 
@@ -1034,7 +1145,7 @@ Run `ai-sync-status` before using delete mode.
 Before destroying a Vast VM:
 
 ```bash
-ai-llama-stop
+ai-server-stop
 ai-sync-to-server
 sync
 ```
@@ -1077,10 +1188,10 @@ Then reinstall the toolkit:
 ```bash
 git clone https://github.com/YOUR_USERNAME/llm-vm-kit.git /opt/llm-vm-kit
 cd /opt/llm-vm-kit
-sudo AI_SYNC_REMOTE_USER="user" \
-     AI_SYNC_REMOTE_HOST="DEDICATED_IP" \
-     AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519" \
-     bash bootstrap.sh
+cp config/ai-sync.env.example config/ai-sync.env
+nano config/ai-sync.env
+bin/ai-sync-from-server
+sudo bash bootstrap.sh
 ```
 
 This restores:
@@ -1145,20 +1256,17 @@ cd /opt/llm-vm-kit
 Fast install test:
 
 ```bash
-sudo AI_SKIP_PULL=1 \
-     AI_SYNC_REMOTE_USER="user" \
-     AI_SYNC_REMOTE_HOST="DEDICATED_IP" \
-     AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519" \
-     bash bootstrap.sh
+cp config/ai-sync.env.example config/ai-sync.env
+nano config/ai-sync.env
+bin/ai-sync-from-server
+sudo AI_SKIP_PULL=1 bash bootstrap.sh
 ```
 
 Full install:
 
 ```bash
-sudo AI_SYNC_REMOTE_USER="user" \
-     AI_SYNC_REMOTE_HOST="DEDICATED_IP" \
-     AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519" \
-     bash bootstrap.sh
+bin/ai-sync-from-server
+sudo bash bootstrap.sh
 ```
 
 Test commands:
@@ -1376,20 +1484,17 @@ Install:
 ```bash
 git clone https://github.com/YOUR_USERNAME/llm-vm-kit.git /opt/llm-vm-kit
 cd /opt/llm-vm-kit
-sudo AI_SYNC_REMOTE_USER="user" \
-     AI_SYNC_REMOTE_HOST="DEDICATED_IP" \
-     AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519" \
-     bash bootstrap.sh
+cp config/ai-sync.env.example config/ai-sync.env
+nano config/ai-sync.env
+bin/ai-sync-from-server
+sudo bash bootstrap.sh
 ```
 
 Skip model pull:
 
 ```bash
-sudo AI_SKIP_PULL=1 \
-     AI_SYNC_REMOTE_USER="user" \
-     AI_SYNC_REMOTE_HOST="DEDICATED_IP" \
-     AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519" \
-     bash bootstrap.sh
+bin/ai-sync-from-server
+sudo AI_SKIP_PULL=1 bash bootstrap.sh
 ```
 
 Show or change model:
@@ -1412,6 +1517,7 @@ Use chat:
 
 ```bash
 set-system-prompt "You are concise, careful, and direct."
+ai-memory add "User prefers sync-required bootstrap and VM-local model files."
 ai-chat
 ```
 

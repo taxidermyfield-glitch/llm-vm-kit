@@ -8,10 +8,6 @@ AI_HOME="${AI_HOME:-/workspace/ai}"
 AI_ENV_FILE="${AI_ENV_FILE:-$AI_HOME/ai.env}"
 AI_REQUIRE_SYNC_CONFIG="${AI_REQUIRE_SYNC_CONFIG:-1}"
 
-if [[ "$AI_REQUIRE_SYNC_CONFIG" == "1" ]]; then
-  AI_AUTO_SYNC_FROM_SERVER="1"
-fi
-
 if [[ "$(id -u)" -eq 0 ]]; then
   SUDO=""
 else
@@ -64,14 +60,17 @@ echo "$STACK_DIR" | $SUDO tee /etc/ai-stack/stack-dir >/dev/null
 
 if [[ ! -f "$AI_ENV_FILE" ]]; then
   if [[ "$AI_REQUIRE_SYNC_CONFIG" == "1" ]]; then
-    echo "No local $AI_ENV_FILE found; dedicated-server sync is required to provide config."
+    echo "No local $AI_ENV_FILE found." >&2
+    echo "Run bin/ai-sync-from-server from the cloned repo before bootstrap so dedicated storage provides the current preset/config." >&2
+    echo "For local-only installs, rerun with AI_REQUIRE_SYNC_CONFIG=0." >&2
+    exit 1
   else
     $SUDO cp "$STACK_DIR/config/ai.env.example" "$AI_ENV_FILE"
   fi
 fi
 
 if [[ -f "$AI_ENV_FILE" || "$AI_REQUIRE_SYNC_CONFIG" != "1" ]]; then
-  for key in AI_MODEL_PRESET AI_BACKEND AI_HF_MODEL AI_MODEL_QUANT AI_MODEL AI_CONTEXT_LENGTH AI_HOME AI_PROJECTS OLLAMA_MODELS AI_HERMES_HOME AI_OPENCODE_HOME AI_SYSTEM_PROMPT_FILE AI_SYSTEM_PROMPT OLLAMA_HOST AI_LLAMA_HOST AI_LLAMA_PORT AI_OPENAI_BASE_URL AI_LLAMA_NGL AI_LLAMA_SPLIT_MODE AI_LLAMA_EXTRA_ARGS AI_VLLM_TENSOR_PARALLEL_SIZE AI_VLLM_DTYPE AI_VLLM_GPU_MEMORY_UTILIZATION AI_VLLM_EXTRA_ARGS AI_AGENT_TOOLSETS AI_TERMINAL_TIMEOUT AI_APPROVAL_MODE AI_BROWSER_CDP_URL AI_WEB_SEARCH_BACKEND AI_WEB_EXTRACT_BACKEND AI_SYNC_REMOTE_USER AI_SYNC_REMOTE_HOST AI_SYNC_REMOTE_PORT AI_SYNC_REMOTE_ROOT AI_SYNC_SSH_KEY AI_SYNC_LOCAL_ROOT AI_SYNC_AI_HOME AI_SYNC_DELETE AI_AUTO_SYNC_FROM_SERVER AI_REQUIRE_SYNC_CONFIG; do
+  for key in AI_MODEL_PRESET AI_BACKEND AI_HF_MODEL AI_MODEL_QUANT AI_MODEL AI_CONTEXT_LENGTH AI_HOME AI_PROJECTS OLLAMA_MODELS AI_HERMES_HOME AI_OPENCODE_HOME AI_SYSTEM_PROMPT_FILE AI_SYSTEM_PROMPT AI_MEMORY_DIR AI_MEMORY_FILE OLLAMA_HOST AI_LLAMA_HOST AI_LLAMA_PORT AI_OPENAI_BASE_URL AI_LLAMA_NGL AI_LLAMA_SPLIT_MODE AI_LLAMA_EXTRA_ARGS AI_VLLM_TENSOR_PARALLEL_SIZE AI_VLLM_DTYPE AI_VLLM_GPU_MEMORY_UTILIZATION AI_VLLM_EXTRA_ARGS AI_AGENT_TOOLSETS AI_TERMINAL_TIMEOUT AI_APPROVAL_MODE AI_BROWSER_CDP_URL AI_WEB_SEARCH_BACKEND AI_WEB_EXTRACT_BACKEND AI_REQUIRE_SYNC_CONFIG; do
     if [[ -n "${!key:-}" ]]; then
       set_env_value "$AI_ENV_FILE" "$key" "${!key}"
     fi
@@ -336,9 +335,7 @@ install_vllm() {
   python3 -m pip install --upgrade vllm
 }
 
-if [[ "${AI_REQUIRE_SYNC_CONFIG:-1}" == "1" && ! -f "$AI_ENV_FILE" ]]; then
-  echo "Deferring model backend install until after dedicated-server sync."
-elif [[ "${AI_BACKEND:-llamacpp}" == "llamacpp" ]]; then
+if [[ "${AI_BACKEND:-llamacpp}" == "llamacpp" ]]; then
   install_llama_cpp
 else
   echo "Skipping llama.cpp install because AI_BACKEND=${AI_BACKEND}."
@@ -414,31 +411,6 @@ fi
 
 hash -r
 
-if [[ "${AI_AUTO_SYNC_FROM_SERVER:-0}" == "1" ]]; then
-  echo "AI_AUTO_SYNC_FROM_SERVER=1; syncing persistent state from dedicated server..."
-  ai-sync-from-server
-  # ai-sync-from-server may replace ai.env with the persistent base config.
-  # shellcheck disable=SC1091
-  source "$STACK_DIR/lib/env.sh"
-
-  if [[ "${AI_REQUIRE_SYNC_CONFIG:-1}" == "1" && ! -f "$AI_ENV_FILE" ]]; then
-    echo "Required sync did not create $AI_ENV_FILE." >&2
-    echo "Create $AI_SYNC_REMOTE_ROOT/config/ai.env.base on the dedicated server and rerun bootstrap." >&2
-    exit 1
-  fi
-
-  $SUDO mkdir -p "$AI_HOME" "$AI_PROJECTS" "$AI_HERMES_HOME" "$AI_OPENCODE_HOME" "$AI_HOME/logs"
-  touch "$AI_HERMES_HOME/.env"
-  chmod 600 "$AI_HERMES_HOME/.env" || true
-
-  if [[ "$RUN_USER" != "root" ]]; then
-    $SUDO chown -R "$RUN_USER:$RUN_GROUP" "$AI_HOME" "$AI_PROJECTS" || true
-  fi
-elif [[ "${AI_REQUIRE_SYNC_CONFIG:-1}" == "1" ]]; then
-  echo "AI_REQUIRE_SYNC_CONFIG=1 requires a successful ai-sync-from-server before model pull." >&2
-  exit 1
-fi
-
 case "${AI_BACKEND:-llamacpp}" in
   llamacpp)
     if ! command -v llama-server >/dev/null 2>&1; then
@@ -461,7 +433,7 @@ echo "Configuring llama.cpp backend..."
 ai-configure
 
 if [[ "${AI_SKIP_PULL:-0}" != "1" ]]; then
-  echo "Starting llama.cpp model server..."
+  echo "Starting configured model server..."
   ai-pull
 else
   echo "Skipping model server start/download because AI_SKIP_PULL=1"

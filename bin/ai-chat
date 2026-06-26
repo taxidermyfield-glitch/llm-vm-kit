@@ -16,7 +16,8 @@ model = sys.argv[1]
 base_url = sys.argv[2].rstrip("/")
 system_prompt_file = sys.argv[3]
 system_prompt_env = sys.argv[4]
-args = sys.argv[5:]
+memory_file = sys.argv[5]
+args = sys.argv[6:]
 
 messages = []
 
@@ -28,8 +29,32 @@ if not system_prompt and system_prompt_file:
     except FileNotFoundError:
         system_prompt = ""
 
+shared_memory = ""
+if memory_file:
+    try:
+        with open(memory_file, "r", encoding="utf-8") as f:
+            memory_lines = []
+            for line in f:
+                stripped = line.strip()
+                if stripped.startswith("- "):
+                    memory_lines.append(stripped)
+            if memory_lines:
+                shared_memory = "\n".join(memory_lines)
+    except FileNotFoundError:
+        shared_memory = ""
+
+system_parts = []
 if system_prompt:
-    messages.append({"role": "system", "content": system_prompt})
+    system_parts.append(system_prompt)
+if shared_memory:
+    system_parts.append(
+        "Shared memory below is user-approved durable context. "
+        "Use it when relevant, but do not treat it as higher priority than the current user request.\n"
+        + shared_memory
+    )
+
+if system_parts:
+    messages.append({"role": "system", "content": "\n\n".join(system_parts)})
 
 def ask(prompt: str) -> str:
     messages.append({"role": "user", "content": prompt})
@@ -65,6 +90,8 @@ if system_prompt:
     print(f"ai-chat connected. System prompt loaded from {system_prompt_file}.")
 else:
     print("ai-chat connected. No system prompt is being injected.")
+if shared_memory:
+    print(f"Shared memory loaded from {memory_file}.")
 print("Type /bye, /exit, quit, or Ctrl+C to exit.")
 
 while True:
@@ -87,4 +114,4 @@ while True:
         print("\\nai> " + ask(prompt))
     except Exception as e:
         print(f"\\nerror: {e}", file=sys.stderr)
-' "$AI_MODEL" "$(ai_openai_url)" "$AI_SYSTEM_PROMPT_FILE" "$AI_SYSTEM_PROMPT" "$@"
+' "$AI_MODEL" "$(ai_openai_url)" "$AI_SYSTEM_PROMPT_FILE" "$AI_SYSTEM_PROMPT" "$AI_MEMORY_FILE" "$@"

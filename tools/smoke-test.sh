@@ -10,10 +10,12 @@ required=(
   lib/env.sh
   lib/sync.sh
   config/ai.env.example
+  config/ai-sync.env.example
   bin/ai-chat
   bin/ai-code
   bin/ai-agent
   bin/ai-model
+  bin/ai-memory
   bin/ai-pull
   bin/ai-status
   bin/ai-server-start
@@ -43,8 +45,10 @@ done < <(find . -type f \( -name '*.sh' -o -path './bin/ai-*' -o -path './bin/se
 python3 - <<'PY'
 from pathlib import Path
 
-text = Path("config/ai.env.example").read_text()
-required = [
+env_text = Path("config/ai.env.example").read_text()
+sync_text = Path("config/ai-sync.env.example").read_text()
+
+env_required = [
     "AI_HF_MODEL=",
     "AI_BACKEND=",
     "AI_MODEL=",
@@ -52,6 +56,15 @@ required = [
     "AI_CONTEXT_LENGTH=",
     "OLLAMA_MODELS=",
     "AI_SYSTEM_PROMPT_FILE=",
+    "AI_MEMORY_DIR=",
+    "AI_MEMORY_FILE=",
+    "AI_VLLM_TENSOR_PARALLEL_SIZE=",
+    "AI_VLLM_DTYPE=",
+    "AI_VLLM_GPU_MEMORY_UTILIZATION=",
+    "AI_VLLM_EXTRA_ARGS=",
+]
+
+sync_required = [
     "AI_SYNC_REMOTE_USER=",
     "AI_SYNC_REMOTE_HOST=",
     "AI_SYNC_REMOTE_PORT=",
@@ -60,14 +73,10 @@ required = [
     "AI_SYNC_LOCAL_ROOT=",
     "AI_SYNC_AI_HOME=",
     "AI_SYNC_DELETE=",
-    "AI_AUTO_SYNC_FROM_SERVER=",
-    "AI_REQUIRE_SYNC_CONFIG=",
-    "AI_VLLM_TENSOR_PARALLEL_SIZE=",
-    "AI_VLLM_DTYPE=",
-    "AI_VLLM_GPU_MEMORY_UTILIZATION=",
-    "AI_VLLM_EXTRA_ARGS=",
 ]
-missing = [x for x in required if x not in text]
+
+missing = [x for x in env_required if x not in env_text]
+missing += [x for x in sync_required if x not in sync_text]
 if missing:
     raise SystemExit(f"Missing config keys: {missing}")
 PY
