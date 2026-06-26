@@ -5,14 +5,27 @@ AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo 
 # shellcheck disable=SC1091
 source "$AI_STACK_DIR/lib/env.sh"
 
-echo "Using llama.cpp backend."
-echo "Step 1: download/cache GGUF locally with Hugging Face CLI."
-ai-download-model
+case "${AI_BACKEND:-llamacpp}" in
+  llamacpp)
+    echo "Using llama.cpp backend."
+    echo "Step 1: download/cache GGUF locally with Hugging Face CLI."
+    ai-download-model
 
-echo
-echo "Reloading env after AI_LOCAL_MODEL update..."
-# shellcheck disable=SC1091
-source "$AI_STACK_DIR/lib/env.sh"
+    echo
+    echo "Reloading env after AI_LOCAL_MODEL update..."
+    # shellcheck disable=SC1091
+    source "$AI_STACK_DIR/lib/env.sh"
 
-echo "Step 2: start llama-server with local GGUF."
-ai-llama-start
+    echo "Step 2: start llama-server with local GGUF."
+    ai-llama-start
+    ;;
+  vllm)
+    echo "Using vLLM backend."
+    echo "vLLM downloads/caches the Hugging Face model when the server starts."
+    ai-vllm-start
+    ;;
+  *)
+    echo "Unsupported AI_BACKEND=${AI_BACKEND}. Expected llamacpp or vllm." >&2
+    exit 1
+    ;;
+esac

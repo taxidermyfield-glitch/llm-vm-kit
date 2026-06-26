@@ -16,9 +16,15 @@ required=(
   bin/ai-model
   bin/ai-pull
   bin/ai-status
+  bin/ai-server-start
+  bin/ai-server-stop
+  bin/ai-vllm-start
+  bin/ai-vllm-stop
   bin/ai-sync-from-server
   bin/ai-sync-to-server
   bin/ai-sync-status
+  bin/ai-set-system-prompt
+  bin/set-system-prompt
   bin/ai-configure
   bin/ai-ollama-start
   bin/ai-browser-start
@@ -32,7 +38,7 @@ done
 
 while IFS= read -r -d '' f; do
   bash -n "$f"
-done < <(find . -type f \( -name '*.sh' -o -path './bin/ai-*' -o -name 'install.sh' -o -name 'bootstrap.sh' \) -print0)
+done < <(find . -type f \( -name '*.sh' -o -path './bin/ai-*' -o -path './bin/set-system-prompt' -o -name 'install.sh' -o -name 'bootstrap.sh' \) -print0)
 
 python3 - <<'PY'
 from pathlib import Path
@@ -40,9 +46,12 @@ from pathlib import Path
 text = Path("config/ai.env.example").read_text()
 required = [
     "AI_HF_MODEL=",
+    "AI_BACKEND=",
     "AI_MODEL=",
+    "AI_MODEL_PRESET=",
     "AI_CONTEXT_LENGTH=",
     "OLLAMA_MODELS=",
+    "AI_SYSTEM_PROMPT_FILE=",
     "AI_SYNC_REMOTE_USER=",
     "AI_SYNC_REMOTE_HOST=",
     "AI_SYNC_REMOTE_PORT=",
@@ -53,6 +62,10 @@ required = [
     "AI_SYNC_DELETE=",
     "AI_AUTO_SYNC_FROM_SERVER=",
     "AI_REQUIRE_SYNC_CONFIG=",
+    "AI_VLLM_TENSOR_PARALLEL_SIZE=",
+    "AI_VLLM_DTYPE=",
+    "AI_VLLM_GPU_MEMORY_UTILIZATION=",
+    "AI_VLLM_EXTRA_ARGS=",
 ]
 missing = [x for x in required if x not in text]
 if missing:

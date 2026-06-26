@@ -2,7 +2,9 @@
 
 `llm-vm-kit` is a portable setup kit for turning a fresh Ubuntu/CUDA GPU rental VM into a local AI workstation.
 
-Default model: `cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M`.
+Default model preset: `llama-3.3-70b`, using `hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M` through llama.cpp.
+
+Alternate max-power preset: `hermes-405b`, using `NousResearch/Hermes-3-Llama-3.1-405B` through vLLM.
 
 After installation, you get three main commands:
 
@@ -53,6 +55,11 @@ ai-agent
 ai-model
 ai-pull
 ai-status
+ai-server-start
+ai-server-stop
+ai-vllm-start
+ai-vllm-stop
+set-system-prompt
 ai-sync-from-server
 ai-sync-to-server
 ai-sync-status
@@ -82,6 +89,7 @@ The installer configures:
 
 ```text
 llama.cpp     local model server
+vLLM          local server for safetensors presets such as Hermes 405B, when selected
 OpenCode      coding agent
 Hermes Agent  autonomous terminal/browser/tool agent
 Node.js       needed for JS tools and MCP servers
@@ -193,7 +201,7 @@ install Google Chrome for browser automation
 install the ai-* commands into /usr/local/bin
 sync /workspace/ai/ai.env from /srv/ai-persistent/config/ai.env.base
 start llama-server
-download/cache the configured Hugging Face GGUF model through llama.cpp
+download/cache the configured Hugging Face model with llama.cpp or vLLM
 serve the model through a local OpenAI-compatible endpoint using the model name local-ai
 ```
 
@@ -234,20 +242,72 @@ ai-pull
 
 # 6. Install with a custom model immediately
 
-In sync-required mode, set the model in the dedicated server base config before creating the VM:
+In sync-required mode, set the model in the dedicated server base config before creating the VM.
+
+Built-in presets:
+
+```text
+llama-3.3-70b   mid-range default, llama.cpp + GGUF, 32K context
+hermes-405b     max-power default, vLLM + full BF16 safetensors, 32K context preset, 128K architecture support
+```
+
+Switch the persistent default to Hermes 405B before creating a fresh VM:
+
+```bash
+AI_STACK_DIR=/opt/llm-vm-kit \
+AI_ENV_FILE=/srv/ai-persistent/config/ai.env.base \
+/opt/llm-vm-kit/bin/ai-model hermes-405b --no-pull
+```
+
+That command prints a hardware warning and asks you to type `405B` before changing the config.
+
+The `hermes-405b` preset is intentionally the maximum-power option. The Hugging Face model card lists BF16 tensors and says the model needs over 800GB of VRAM to load before KV cache, runtime overhead, long-context memory, or batching. Use it only on a very large multi-GPU or multi-node VM.
+
+Switch back to the normal 70B default:
+
+```bash
+AI_STACK_DIR=/opt/llm-vm-kit \
+AI_ENV_FILE=/srv/ai-persistent/config/ai.env.base \
+/opt/llm-vm-kit/bin/ai-model llama-3.3-70b --no-pull
+```
+
+You can also edit the base config manually:
 
 ```bash
 nano /srv/ai-persistent/config/ai.env.base
 ```
 
-Example values:
+70B default values:
 
 ```bash
-AI_HF_MODEL="hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M"
-AI_CONTEXT_LENGTH="8192"
+AI_MODEL_PRESET="llama-3.3-70b"
+AI_BACKEND="llamacpp"
+AI_HF_MODEL="hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M"
+AI_MODEL_QUANT="Q4_K_M"
+AI_CONTEXT_LENGTH="32768"
+```
+
+Hermes 405B max-power values:
+
+```bash
+AI_MODEL_PRESET="hermes-3-llama-3.1-405b"
+AI_BACKEND="vllm"
+AI_HF_MODEL="NousResearch/Hermes-3-Llama-3.1-405B"
+AI_CONTEXT_LENGTH="32768"
+AI_VLLM_TENSOR_PARALLEL_SIZE="16"
+AI_VLLM_DTYPE="bfloat16"
 ```
 
 Bootstrap syncs this config down first, then `ai-pull` downloads the matching VM-local model.
+
+For custom models:
+
+```bash
+ai-model mid-range
+ai-model max-power
+ai-model hf.co/OWNER/GGUF-REPO:Q4_K_M
+ai-model --backend vllm OWNER/REPO
+```
 
 ---
 
@@ -282,11 +342,13 @@ Ctrl+X
 Important lines:
 
 ```bash
+AI_MODEL_PRESET="llama-3.3-70b"
 AI_BACKEND="llamacpp"
-AI_HF_MODEL="hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M"
+AI_HF_MODEL="hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M"
 AI_MODEL="local-ai"
-AI_CONTEXT_LENGTH="8192"
+AI_CONTEXT_LENGTH="32768"
 AI_OPENAI_BASE_URL="http://127.0.0.1:18080/v1"
+AI_SYSTEM_PROMPT_FILE="/workspace/ai/persistent-config/system-prompt.txt"
 AI_AUTO_BROWSER="1"
 AI_BROWSER_CDP_URL="http://127.0.0.1:9222"
 ```
@@ -294,9 +356,12 @@ AI_BROWSER_CDP_URL="http://127.0.0.1:9222"
 Meaning:
 
 ```text
-AI_HF_MODEL         Hugging Face GGUF model to serve
+AI_MODEL_PRESET     selected built-in preset or custom
+AI_BACKEND          serving backend: llamacpp or vllm
+AI_HF_MODEL         Hugging Face model to serve
 AI_MODEL            model name exposed to OpenAI-compatible clients
 AI_CONTEXT_LENGTH   context window size
+AI_SYSTEM_PROMPT_FILE persistent system prompt file used by ai-chat
 AI_AUTO_BROWSER     whether ai-agent auto-starts headless Chrome
 AI_BROWSER_CDP_URL  local Chrome DevTools browser endpoint
 ```
@@ -317,16 +382,21 @@ AI_OPENAI_BASE_URL
 
 ---
 
-# 8. Hugging Face model format
+# 8. Hugging Face model formats
 
-This toolkit uses **llama.cpp server** as the default backend.
+This toolkit supports two local serving backends:
 
-Models should still be Hugging Face **GGUF** models.
+```text
+llamacpp  Hugging Face GGUF models
+vllm      Hugging Face safetensors models
+```
 
-Correct format in `/workspace/ai/ai.env`:
+The default preset uses **llama.cpp** with a Hugging Face **GGUF** model.
+
+Correct llama.cpp format in `/workspace/ai/ai.env`:
 
 ```bash
-AI_HF_MODEL="hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M"
+AI_HF_MODEL="hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M"
 ```
 
 For llama.cpp internals, the toolkit converts this to:
@@ -338,8 +408,7 @@ OWNER/REPO:QUANT
 Examples:
 
 ```bash
-hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
-hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
+hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M
 hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q6_K
 hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q8_0
 hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:BF16
@@ -354,7 +423,7 @@ HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive
 Correct:
 
 ```bash
-hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
+hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M
 ```
 
 If a short quant tag does not work, use the exact `.gguf` filename from the Hugging Face file list:
@@ -400,7 +469,7 @@ Use:
 Full model string:
 
 ```bash
-hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
+hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M
 ```
 
 If you see a table like this:
@@ -418,7 +487,7 @@ then valid model strings are:
 hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:BF16
 hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q8_0
 hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q6_K
-hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
+hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M
 ```
 
 ---
@@ -461,10 +530,13 @@ BF16
 ## Method 1: use ai-model
 
 ```bash
-ai-model hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
+ai-model llama-3.3-70b
+ai-model hermes-405b
+ai-model hf.co/OWNER/GGUF-REPO:Q4_K_M
+ai-model --backend vllm OWNER/REPO
 ```
 
-This updates `/workspace/ai/ai.env`, pulls the model, and rebuilds the OpenAI-compatible model name.
+This updates `/workspace/ai/ai.env`, stops the old server, and starts the selected backend unless `--no-pull` is used.
 
 ## Method 2: edit manually
 
@@ -475,7 +547,10 @@ sudo nano /workspace/ai/ai.env
 Change:
 
 ```bash
-AI_HF_MODEL="hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M"
+AI_MODEL_PRESET="llama-3.3-70b"
+AI_BACKEND="llamacpp"
+AI_HF_MODEL="hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M"
+AI_CONTEXT_LENGTH="32768"
 ```
 
 Then apply:
@@ -553,7 +628,7 @@ Start local chat:
 ai-chat
 ```
 
-This opens an interactive llama.cpp chat session.
+This opens an interactive chat session against the configured local model server.
 
 One-shot prompt:
 
@@ -568,6 +643,32 @@ Exit chat:
 Ctrl+D
 Ctrl+C
 ```
+
+---
+
+## set-system-prompt
+
+Set the system prompt used by `ai-chat`:
+
+```bash
+set-system-prompt "You are concise, careful, and direct."
+```
+
+Multi-line prompt:
+
+```bash
+cat > /tmp/system-prompt.txt
+set-system-prompt < /tmp/system-prompt.txt
+```
+
+Show or clear it:
+
+```bash
+set-system-prompt --show
+set-system-prompt --clear
+```
+
+The prompt is stored at `/workspace/ai/persistent-config/system-prompt.txt`, so `ai-sync-to-server` persists it.
 
 ---
 
@@ -1291,10 +1392,14 @@ sudo AI_SKIP_PULL=1 \
      bash bootstrap.sh
 ```
 
-Change model:
+Show or change model:
 
 ```bash
-ai-model hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M
+ai-model
+ai-model llama-3.3-70b
+ai-model hermes-405b
+ai-model max-power
+ai-model hf.co/OWNER/GGUF-REPO:Q4_K_M
 ```
 
 Edit config:
@@ -1306,6 +1411,7 @@ sudo nano /workspace/ai/ai.env
 Use chat:
 
 ```bash
+set-system-prompt "You are concise, careful, and direct."
 ai-chat
 ```
 

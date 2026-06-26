@@ -5,7 +5,7 @@ AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo 
 # shellcheck disable=SC1091
 source "$AI_STACK_DIR/lib/env.sh"
 
-ai-llama-start >/dev/null
+ai-server-start >/dev/null
 
 if [[ "${AI_AUTO_BROWSER:-1}" == "1" ]]; then
   if command -v ai-browser-start >/dev/null 2>&1; then

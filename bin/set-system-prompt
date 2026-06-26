@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/env.sh"
+
+prompt_file="${AI_SYSTEM_PROMPT_FILE:-$AI_HOME/system-prompt.txt}"
+
+usage() {
+  cat <<'MSG'
+Usage:
+  set-system-prompt "You are concise and careful."
+  printf '%s\n' "multi-line prompt" | set-system-prompt
+  set-system-prompt --show
+  set-system-prompt --clear
+MSG
+}
+
+case "${1:-}" in
+  --help|-h)
+    usage
+    exit 0
+    ;;
+  --show)
+    if [[ -f "$prompt_file" ]]; then
+      cat "$prompt_file"
+    else
+      echo "No system prompt set at $prompt_file" >&2
+      exit 1
+    fi
+    exit 0
+    ;;
+  --clear)
+    rm -f "$prompt_file"
+    echo "Cleared system prompt: $prompt_file"
+    exit 0
+    ;;
+esac
+
+mkdir -p "$(dirname "$prompt_file")"
+
+if [[ $# -gt 0 ]]; then
+  printf '%s\n' "$*" > "$prompt_file"
+else
+  if [[ -t 0 ]]; then
+    echo "Enter system prompt, then press Ctrl+D:"
+  fi
+  cat > "$prompt_file"
+fi
+
+chmod 600 "$prompt_file" || true
+
+if [[ ! -s "$prompt_file" ]]; then
+  rm -f "$prompt_file"
+  echo "Empty prompt; cleared system prompt."
+else
+  echo "Wrote system prompt: $prompt_file"
+fi

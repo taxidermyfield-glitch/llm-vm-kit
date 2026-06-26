@@ -71,7 +71,7 @@ if [[ ! -f "$AI_ENV_FILE" ]]; then
 fi
 
 if [[ -f "$AI_ENV_FILE" || "$AI_REQUIRE_SYNC_CONFIG" != "1" ]]; then
-  for key in AI_BACKEND AI_HF_MODEL AI_MODEL AI_CONTEXT_LENGTH AI_HOME AI_PROJECTS OLLAMA_MODELS AI_HERMES_HOME AI_OPENCODE_HOME OLLAMA_HOST AI_AGENT_TOOLSETS AI_TERMINAL_TIMEOUT AI_APPROVAL_MODE AI_BROWSER_CDP_URL AI_WEB_SEARCH_BACKEND AI_WEB_EXTRACT_BACKEND AI_SYNC_REMOTE_USER AI_SYNC_REMOTE_HOST AI_SYNC_REMOTE_PORT AI_SYNC_REMOTE_ROOT AI_SYNC_SSH_KEY AI_SYNC_LOCAL_ROOT AI_SYNC_AI_HOME AI_SYNC_DELETE AI_AUTO_SYNC_FROM_SERVER AI_REQUIRE_SYNC_CONFIG; do
+  for key in AI_MODEL_PRESET AI_BACKEND AI_HF_MODEL AI_MODEL_QUANT AI_MODEL AI_CONTEXT_LENGTH AI_HOME AI_PROJECTS OLLAMA_MODELS AI_HERMES_HOME AI_OPENCODE_HOME AI_SYSTEM_PROMPT_FILE AI_SYSTEM_PROMPT OLLAMA_HOST AI_LLAMA_HOST AI_LLAMA_PORT AI_OPENAI_BASE_URL AI_LLAMA_NGL AI_LLAMA_SPLIT_MODE AI_LLAMA_EXTRA_ARGS AI_VLLM_TENSOR_PARALLEL_SIZE AI_VLLM_DTYPE AI_VLLM_GPU_MEMORY_UTILIZATION AI_VLLM_EXTRA_ARGS AI_AGENT_TOOLSETS AI_TERMINAL_TIMEOUT AI_APPROVAL_MODE AI_BROWSER_CDP_URL AI_WEB_SEARCH_BACKEND AI_WEB_EXTRACT_BACKEND AI_SYNC_REMOTE_USER AI_SYNC_REMOTE_HOST AI_SYNC_REMOTE_PORT AI_SYNC_REMOTE_ROOT AI_SYNC_SSH_KEY AI_SYNC_LOCAL_ROOT AI_SYNC_AI_HOME AI_SYNC_DELETE AI_AUTO_SYNC_FROM_SERVER AI_REQUIRE_SYNC_CONFIG; do
     if [[ -n "${!key:-}" ]]; then
       set_env_value "$AI_ENV_FILE" "$key" "${!key}"
     fi
@@ -320,7 +320,29 @@ install_llama_cpp() {
   llama-server --help | head -20 || true
 }
 
-install_llama_cpp
+install_vllm() {
+  if command -v vllm >/dev/null 2>&1; then
+    echo "vLLM already installed: $(command -v vllm)"
+    return 0
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required to install vLLM." >&2
+    return 1
+  fi
+
+  echo "Installing vLLM for safetensors model serving..."
+  python3 -m pip install --upgrade pip
+  python3 -m pip install --upgrade vllm
+}
+
+if [[ "${AI_REQUIRE_SYNC_CONFIG:-1}" == "1" && ! -f "$AI_ENV_FILE" ]]; then
+  echo "Deferring model backend install until after dedicated-server sync."
+elif [[ "${AI_BACKEND:-llamacpp}" == "llamacpp" ]]; then
+  install_llama_cpp
+else
+  echo "Skipping llama.cpp install because AI_BACKEND=${AI_BACKEND}."
+fi
 
 
 
@@ -386,6 +408,9 @@ echo "Installing ai-* commands..."
 for f in "$STACK_DIR"/bin/ai-*; do
   $SUDO install -m 0755 "$f" "/usr/local/bin/$(basename "$f")"
 done
+if [[ -f "$STACK_DIR/bin/set-system-prompt" ]]; then
+  $SUDO install -m 0755 "$STACK_DIR/bin/set-system-prompt" /usr/local/bin/set-system-prompt
+fi
 
 hash -r
 
@@ -414,6 +439,21 @@ elif [[ "${AI_REQUIRE_SYNC_CONFIG:-1}" == "1" ]]; then
   exit 1
 fi
 
+case "${AI_BACKEND:-llamacpp}" in
+  llamacpp)
+    if ! command -v llama-server >/dev/null 2>&1; then
+      install_llama_cpp
+    fi
+    ;;
+  vllm)
+    install_vllm
+    ;;
+  *)
+    echo "Unsupported AI_BACKEND=${AI_BACKEND}. Expected llamacpp or vllm." >&2
+    exit 1
+    ;;
+esac
+
 echo "Configuring tools..."
 ai-configure
 
@@ -437,9 +477,12 @@ Main commands:
   ai-chat                 local chat through llama.cpp
   ai-code                 repo coding agent through OpenCode
   ai-agent                autonomous worker through Hermes
-  ai-model                show or change the Hugging Face GGUF model
-  ai-pull                 pull current HF model and rebuild local alias
-  ai-status               inspect GPU, tools, config, and llama.cpp state
+  ai-model                show/change presets or custom Hugging Face models
+  ai-pull                 pull/start the configured model backend
+  ai-status               inspect GPU, tools, config, and model server state
+  ai-server-start         start the configured model backend
+  ai-server-stop          stop the configured model backend
+  set-system-prompt       set the chat system prompt
   ai-sync-from-server     pull persistent state from a dedicated server
   ai-sync-to-server       push persistent state before VM disposal
   ai-sync-status          dry-run sync differences

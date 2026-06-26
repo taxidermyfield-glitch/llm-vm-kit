@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+pkill -f "vllm.*serve" 2>/dev/null || true
+pkill -f "vllm.entrypoints.openai" 2>/dev/null || true
+echo "Stopped vLLM server if it was running."

@@ -16,7 +16,7 @@ cat > "$AI_OPENCODE_HOME/opencode.json" <<EOF_JSON
   "provider": {
     "local": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "Local llama.cpp",
+      "name": "Local model server",
       "options": {
         "baseURL": "$(ai_openai_url)",
         "apiKey": "llama"

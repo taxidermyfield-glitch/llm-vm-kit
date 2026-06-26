@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/env.sh"
+
+case "${AI_BACKEND:-llamacpp}" in
+  llamacpp)
+    exec ai-llama-start "$@"
+    ;;
+  vllm)
+    exec ai-vllm-start "$@"
+    ;;
+  *)
+    echo "Unsupported AI_BACKEND=${AI_BACKEND}. Expected llamacpp or vllm." >&2
+    exit 1
+    ;;
+esac

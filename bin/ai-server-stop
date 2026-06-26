@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo /opt/llm-vm-kit)}"
+# shellcheck disable=SC1091
+source "$AI_STACK_DIR/lib/env.sh"
+
+case "${AI_BACKEND:-llamacpp}" in
+  llamacpp)
+    exec ai-llama-stop "$@"
+    ;;
+  vllm)
+    exec ai-vllm-stop "$@"
+    ;;
+  *)
+    ai-llama-stop "$@" 2>/dev/null || true
+    ai-vllm-stop "$@" 2>/dev/null || true
+    ;;
+esac

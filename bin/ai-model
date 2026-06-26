@@ -6,53 +6,197 @@ AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo 
 source "$AI_STACK_DIR/lib/env.sh"
 
 ENV_FILE="$AI_ENV_FILE"
+yes=0
+run_pull=1
+custom_backend=""
+args=()
 
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "No env file found at $ENV_FILE" >&2
-  exit 1
-fi
+usage() {
+  cat <<'MSG'
+Usage:
+  ai-model
+  ai-model --list-presets
+  ai-model llama-3.3-70b
+  ai-model hermes-405b
+  ai-model max-power
+  ai-model https://huggingface.co/NousResearch/Hermes-3-Llama-3.1-405B
+  ai-model --env-file /srv/ai-persistent/config/ai.env.base hermes-405b --no-pull
+  ai-model hf.co/OWNER/GGUF-REPO:Q4_K_M
+  ai-model --backend vllm OWNER/REPO
 
-if [[ $# -eq 0 ]]; then
+Options:
+  --env-file FILE   update a specific env file
+  --backend NAME    custom model backend: llamacpp or vllm
+  --no-pull         update config only; do not restart/download the model
+  -y, --yes         accept large-model warnings
+MSG
+}
+
+list_presets() {
+  cat <<'MSG'
+Preset aliases:
+  default, mid-range, 70b, llama-3.3-70b
+    backend: llamacpp
+    model:   hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M
+    context: 32768
+
+  max-power, hermes-405b, 405b, hermes-3-405b, https://huggingface.co/NousResearch/Hermes-3-Llama-3.1-405B
+    backend: vllm
+    model:   NousResearch/Hermes-3-Llama-3.1-405B
+    context: 32768 default; model architecture supports up to 131072
+MSG
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --list-presets)
+      list_presets
+      exit 0
+      ;;
+    --env-file)
+      ENV_FILE="${2:?missing value for --env-file}"
+      shift 2
+      ;;
+    --backend)
+      custom_backend="${2:?missing value for --backend}"
+      shift 2
+      ;;
+    --no-pull)
+      run_pull=0
+      shift
+      ;;
+    --yes|-y)
+      yes=1
+      shift
+      ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ "${#args[@]}" -eq 0 ]]; then
   echo "Config: $ENV_FILE"
   echo
-  grep -E '^(AI_BACKEND|AI_HF_MODEL|AI_MODEL_QUANT|AI_LOCAL_MODEL|AI_MODEL|AI_CONTEXT_LENGTH|AI_OPENAI_BASE_URL)=' "$ENV_FILE" || true
+  if [[ -f "$ENV_FILE" ]]; then
+    grep -E '^(AI_MODEL_PRESET|AI_BACKEND|AI_HF_MODEL|AI_MODEL_QUANT|AI_LOCAL_MODEL|AI_MODEL|AI_CONTEXT_LENGTH|AI_VLLM_TENSOR_PARALLEL_SIZE|AI_OPENAI_BASE_URL)=' "$ENV_FILE" || true
+  else
+    echo "No env file found."
+  fi
   echo
-  echo "Example:"
-  echo '  ai-model hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M'
+  list_presets
   exit 0
 fi
 
-new_model="$1"
+selection="${args[0]}"
+selection_lc="$(printf '%s' "$selection" | tr '[:upper:]' '[:lower:]')"
 
-if [[ "$new_model" != *:* ]]; then
-  echo "Model must include a quant/tag after ':'" >&2
-  echo "Example:" >&2
-  echo "  hf.co/cyberneurova/CyberNeurova-Kimi-K2.7-Code-UD-IQ2_M-abliterated-GGUF:UD-IQ2_M" >&2
-  exit 1
+preset=""
+case "$selection_lc" in
+  default|mid|midrange|mid-range|70b|llama70b|llama-70b|llama-3.3-70b|llama-3.3-70b-gguf)
+    preset="llama-3.3-70b"
+    ;;
+  max|maxpower|max-power|405b|hermes405b|hermes-405b|hermes-3-405b|hermes-3-llama-3.1-405b|https://huggingface.co/nousresearch/hermes-3-llama-3.1-405b|hf.co/nousresearch/hermes-3-llama-3.1-405b|nousresearch/hermes-3-llama-3.1-405b)
+    preset="hermes-3-llama-3.1-405b"
+    ;;
+esac
+
+updates_json=""
+summary=""
+
+if [[ "$preset" == "llama-3.3-70b" ]]; then
+  updates_json='{"AI_MODEL_PRESET":"llama-3.3-70b","AI_BACKEND":"llamacpp","AI_HF_MODEL":"hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M","AI_MODEL_QUANT":"Q4_K_M","AI_MODEL":"local-ai","AI_CONTEXT_LENGTH":"32768","AI_VLLM_TENSOR_PARALLEL_SIZE":"","AI_OPENAI_BASE_URL":"http://127.0.0.1:18080/v1"}'
+  summary="Llama 3.3 70B GGUF preset"
+elif [[ "$preset" == "hermes-3-llama-3.1-405b" ]]; then
+  cat <<'MSG' >&2
+
+Hermes 3 Llama 3.1 405B full-precision is a massive vLLM/safetensors model, not a llama.cpp GGUF.
+
+Pragmatic hardware warning:
+  - The Hugging Face repo is BF16 tensor data and requires over 800GB of VRAM just to load.
+  - KV cache, runtime overhead, long context, and batching require additional memory.
+  - In practice, plan for a serious multi-node or 16x80GB-class setup, or equivalent.
+  - The model architecture supports 128K context, but this preset uses 32K by default to keep KV cache demands less punishing.
+  - Bootstrap will install/use vLLM and may spend a long time downloading model shards.
+
+MSG
+  if [[ "$yes" != "1" ]]; then
+    if [[ ! -t 0 ]]; then
+      echo "Refusing non-interactive 405B switch without --yes." >&2
+      exit 1
+    fi
+    read -r -p "Type 405B to switch to Hermes 405B full-precision: " confirm
+    [[ "$confirm" == "405B" ]] || { echo "Cancelled."; exit 1; }
+  fi
+
+  updates_json='{"AI_MODEL_PRESET":"hermes-3-llama-3.1-405b","AI_BACKEND":"vllm","AI_HF_MODEL":"NousResearch/Hermes-3-Llama-3.1-405B","AI_MODEL_QUANT":"","AI_MODEL":"local-ai","AI_CONTEXT_LENGTH":"32768","AI_VLLM_TENSOR_PARALLEL_SIZE":"16","AI_VLLM_DTYPE":"bfloat16","AI_VLLM_GPU_MEMORY_UTILIZATION":"0.90","AI_VLLM_EXTRA_ARGS":"--trust-remote-code","AI_OPENAI_BASE_URL":"http://127.0.0.1:18080/v1"}'
+  summary="Hermes 3 Llama 3.1 405B full-precision preset"
+else
+  model="$selection"
+  backend="${custom_backend:-llamacpp}"
+
+  case "$backend" in
+    llamacpp)
+      if [[ "$model" != *:* ]]; then
+        echo "llama.cpp custom models must include a quant/tag after ':'." >&2
+        echo "Example: ai-model hf.co/OWNER/GGUF-REPO:Q4_K_M" >&2
+        exit 1
+      fi
+      quant="${model##*:}"
+      updates_json="$(python3 - "$model" "$quant" <<'PY'
+import json, sys
+print(json.dumps({
+    "AI_MODEL_PRESET": "custom",
+    "AI_BACKEND": "llamacpp",
+    "AI_HF_MODEL": sys.argv[1],
+    "AI_MODEL_QUANT": sys.argv[2],
+}))
+PY
+)"
+      summary="custom llama.cpp GGUF model"
+      ;;
+    vllm)
+      model="${model#https://huggingface.co/}"
+      model="${model#hf.co/}"
+      updates_json="$(python3 - "$model" <<'PY'
+import json, sys
+print(json.dumps({
+    "AI_MODEL_PRESET": "custom",
+    "AI_BACKEND": "vllm",
+    "AI_HF_MODEL": sys.argv[1],
+    "AI_MODEL_QUANT": "",
+}))
+PY
+)"
+      summary="custom vLLM model"
+      ;;
+    *)
+      echo "Unsupported custom backend: $backend" >&2
+      exit 1
+      ;;
+  esac
 fi
 
-new_quant="${new_model##*:}"
+mkdir -p "$(dirname "$ENV_FILE")"
 
-python3 - "$ENV_FILE" "$new_model" "$new_quant" <<'PY'
+python3 - "$ENV_FILE" "$updates_json" <<'PY'
 from pathlib import Path
+import json
 import sys
 
 path = Path(sys.argv[1])
-model = sys.argv[2]
-quant = sys.argv[3]
-
-updates = {
-    "AI_HF_MODEL": model,
-    "AI_MODEL_QUANT": quant,
-    "AI_BACKEND": "llamacpp",
-}
+updates = json.loads(sys.argv[2])
 
 lines = path.read_text().splitlines() if path.exists() else []
 out = []
 seen = set()
 
 for line in lines:
-    # clear stale downloaded path whenever model changes
     if line.startswith("AI_LOCAL_MODEL="):
         continue
 
@@ -70,9 +214,31 @@ for key, value in updates.items():
 path.write_text("\n".join(out) + "\n")
 PY
 
-echo "Set AI_HF_MODEL=$new_model"
-echo "Set AI_MODEL_QUANT=$new_quant"
+echo "Updated $ENV_FILE"
+echo "Selected: $summary"
+python3 - "$updates_json" <<'PY'
+import json, sys
+updates = json.loads(sys.argv[1])
+for key in [
+    "AI_MODEL_PRESET",
+    "AI_BACKEND",
+    "AI_HF_MODEL",
+    "AI_MODEL_QUANT",
+    "AI_CONTEXT_LENGTH",
+    "AI_VLLM_TENSOR_PARALLEL_SIZE",
+]:
+    if key in updates:
+        print(f"{key}={updates[key]}")
+PY
 echo "Cleared stale AI_LOCAL_MODEL"
 
-ai-llama-stop 2>/dev/null || true
-ai-pull
+if [[ "$ENV_FILE" != "$AI_ENV_FILE" ]]; then
+  run_pull=0
+fi
+
+if [[ "$run_pull" == "1" ]]; then
+  ai-server-stop 2>/dev/null || true
+  ai-pull
+else
+  echo "Skipped model pull/start. Run ai-pull on the VM after syncing this config."
+fi
