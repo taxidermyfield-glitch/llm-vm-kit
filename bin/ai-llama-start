@@ -34,6 +34,12 @@ else
   model_args=(-hf "$model_ref")
 fi
 
+extra_args=()
+if [[ -n "${AI_LLAMA_EXTRA_ARGS:-}" ]]; then
+  # shellcheck disable=SC2206
+  extra_args=(${AI_LLAMA_EXTRA_ARGS})
+fi
+
 echo "Starting llama-server..."
 echo "Context: $AI_CONTEXT_LENGTH"
 echo "Endpoint: $openai_url"
@@ -52,6 +58,7 @@ nohup env \
     -c "$AI_CONTEXT_LENGTH" \
     -ngl "$AI_LLAMA_NGL" \
     --split-mode "$AI_LLAMA_SPLIT_MODE" \
+    "${extra_args[@]}" \
   > "$log_file" 2>&1 &
 
 pid="$!"

@@ -19,6 +19,7 @@ echo
 case "$direction" in
   to-server|push|upload)
     ai_sync_validate_remote_root
+    ai_sync_remote_dirs
     ai_sync_push_dir "$AI_SYNC_LOCAL_ROOT/projects" "projects"
     ai_sync_push_dir "$AI_SYNC_AI_HOME/datasets" "datasets"
     ai_sync_push_dir "$AI_SYNC_AI_HOME/outputs" "outputs"
@@ -35,6 +36,7 @@ case "$direction" in
     ;;
   from-server|pull|download)
     ai_sync_validate_remote_root
+    ai_sync_remote_dirs
     ai_sync_pull_dir "projects" "$AI_SYNC_LOCAL_ROOT/projects"
     ai_sync_pull_dir "datasets" "$AI_SYNC_AI_HOME/datasets"
     ai_sync_pull_dir "outputs" "$AI_SYNC_AI_HOME/outputs"

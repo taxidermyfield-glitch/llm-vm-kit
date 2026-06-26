@@ -28,7 +28,6 @@ required=(
   bin/ai-set-system-prompt
   bin/set-system-prompt
   bin/ai-configure
-  bin/ai-ollama-start
   bin/ai-browser-start
   bin/ai-backup
   README.md
@@ -47,6 +46,7 @@ from pathlib import Path
 
 env_text = Path("config/ai.env.example").read_text()
 sync_text = Path("config/ai-sync.env.example").read_text()
+sync_lib_text = Path("lib/sync.sh").read_text()
 
 env_required = [
     "AI_HF_MODEL=",
@@ -54,7 +54,6 @@ env_required = [
     "AI_MODEL=",
     "AI_MODEL_PRESET=",
     "AI_CONTEXT_LENGTH=",
-    "OLLAMA_MODELS=",
     "AI_SYSTEM_PROMPT_FILE=",
     "AI_MEMORY_DIR=",
     "AI_MEMORY_FILE=",
@@ -62,6 +61,7 @@ env_required = [
     "AI_VLLM_DTYPE=",
     "AI_VLLM_GPU_MEMORY_UTILIZATION=",
     "AI_VLLM_EXTRA_ARGS=",
+    "AI_INSTALL_OPTIONAL_BACKENDS=",
 ]
 
 sync_required = [
@@ -79,6 +79,25 @@ missing = [x for x in env_required if x not in env_text]
 missing += [x for x in sync_required if x not in sync_text]
 if missing:
     raise SystemExit(f"Missing config keys: {missing}")
+
+for forbidden in ["AI_SYNC_REMOTE_USER=", "AI_SYNC_REMOTE_HOST=", "AI_SYNC_SSH_KEY="]:
+    if forbidden in env_text:
+        raise SystemExit(f"Sync credential key leaked into config/ai.env.example: {forbidden}")
+
+stable_remote_dirs = [
+    "projects",
+    "datasets",
+    "outputs",
+    "config",
+    "memory",
+    "opencode",
+    "hermes",
+    "logs",
+    "sync",
+]
+missing_dirs = [d for d in stable_remote_dirs if f"  {d}" not in sync_lib_text]
+if missing_dirs:
+    raise SystemExit(f"Stable sync schema dirs missing from lib/sync.sh: {missing_dirs}")
 PY
 
 echo "Smoke test passed."

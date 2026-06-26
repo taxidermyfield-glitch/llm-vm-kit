@@ -18,7 +18,8 @@ if [[ -z "${AI_HF_MODEL:-}" ]]; then
   exit 1
 fi
 
-model_ref="${AI_HF_MODEL#hf.co/}"
+model_ref="${AI_HF_MODEL#https://huggingface.co/}"
+model_ref="${model_ref#hf.co/}"
 
 if [[ "$model_ref" != *:* ]]; then
   echo "AI_HF_MODEL must include a quant/tag after ':'" >&2

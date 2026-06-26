@@ -133,7 +133,9 @@ Install the small set of tools needed before bootstrap:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git rsync openssh-client
+sudo apt-get install -y git rsync openssh-client python3
+sudo mkdir -p /workspace
+sudo chown "$USER:$USER" /workspace
 ```
 
 Install the private SSH key for sync:
@@ -204,6 +206,8 @@ Install dependencies and pull/start the selected model:
 ```bash
 sudo bash bootstrap.sh
 ```
+
+Bootstrap requires the selected backend and attempts to install the other built-in backend too, so later preset switches are easier. It only downloads the currently selected model. If optional backend install fails, switch presets first and rerun `sudo bash bootstrap.sh` on that VM.
 
 Check the machine:
 
@@ -312,6 +316,22 @@ Synced paths:
 /workspace/ai/hermes/             <-> /srv/ai-persistent/hermes/
 /workspace/ai/persistent-config/  <-> /srv/ai-persistent/config/
 ```
+
+The dedicated server schema is fixed to this top-level layout:
+
+```text
+projects/
+datasets/
+outputs/
+config/
+memory/
+opencode/
+hermes/
+logs/
+sync/
+```
+
+Future toolkit changes should store durable state inside those existing directories, usually under `config/` for new settings. That keeps server setup stable; updates should only require pulling a newer repo on the GPU VM.
 
 Not synced:
 

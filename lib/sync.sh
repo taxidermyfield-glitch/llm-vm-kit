@@ -5,6 +5,18 @@ AI_STACK_DIR="${AI_STACK_DIR:-$(cat /etc/ai-stack/stack-dir 2>/dev/null || echo 
 # shellcheck disable=SC1091
 source "$AI_STACK_DIR/lib/env.sh"
 
+AI_SYNC_REMOTE_DIRS=(
+  projects
+  datasets
+  outputs
+  config
+  memory
+  opencode
+  hermes
+  logs
+  sync
+)
+
 ai_sync_die() {
   echo "ai-sync: $*" >&2
   exit 1
@@ -41,11 +53,23 @@ ai_sync_init() {
     "$AI_SYNC_SSH_KEY" "$AI_SYNC_REMOTE_PORT"
 }
 
+ai_sync_ensure_local_root() {
+  local dir
+
+  for dir in "$AI_SYNC_LOCAL_ROOT" "$AI_SYNC_AI_HOME"; do
+    if mkdir -p "$dir" 2>/dev/null; then
+      continue
+    fi
+
+    ai_sync_die "cannot create local directory $dir. Run: sudo mkdir -p '$AI_SYNC_LOCAL_ROOT' && sudo chown \"\$USER:\$USER\" '$AI_SYNC_LOCAL_ROOT'"
+  done
+}
+
 ai_sync_build_rsync_args() {
   local enable_delete="${1:-0}"
 
   AI_SYNC_RSYNC_ARGS=(
-    -aHAX
+    -aH
     --info=progress2
     --partial
     --human-readable
@@ -71,6 +95,8 @@ ai_sync_build_rsync_args() {
 }
 
 ai_sync_local_dirs() {
+  ai_sync_ensure_local_root
+
   mkdir -p \
     "$AI_SYNC_LOCAL_ROOT/projects" \
     "$AI_SYNC_AI_HOME/datasets" \
@@ -88,8 +114,14 @@ ai_sync_validate_remote_root() {
 }
 
 ai_sync_remote_dirs() {
-  "${AI_SYNC_SSH_CMD[@]}" "$AI_SYNC_REMOTE" \
-    "mkdir -p '$AI_SYNC_REMOTE_ROOT'/projects '$AI_SYNC_REMOTE_ROOT'/datasets '$AI_SYNC_REMOTE_ROOT'/outputs '$AI_SYNC_REMOTE_ROOT'/config '$AI_SYNC_REMOTE_ROOT'/memory '$AI_SYNC_REMOTE_ROOT'/opencode '$AI_SYNC_REMOTE_ROOT'/hermes '$AI_SYNC_REMOTE_ROOT'/logs '$AI_SYNC_REMOTE_ROOT'/sync"
+  local cmd="mkdir -p"
+  local dir
+
+  for dir in "${AI_SYNC_REMOTE_DIRS[@]}"; do
+    cmd+=" '$AI_SYNC_REMOTE_ROOT/$dir'"
+  done
+
+  "${AI_SYNC_SSH_CMD[@]}" "$AI_SYNC_REMOTE" "$cmd"
 }
 
 ai_sync_pull_dir() {

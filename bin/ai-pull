@@ -16,12 +16,16 @@ case "${AI_BACKEND:-llamacpp}" in
     # shellcheck disable=SC1091
     source "$AI_STACK_DIR/lib/env.sh"
 
-    echo "Step 2: start llama-server with local GGUF."
+    echo "Step 2: restart local model servers."
+    ai-server-stop >/dev/null 2>&1 || true
+
+    echo "Step 3: start llama-server with local GGUF."
     ai-llama-start
     ;;
   vllm)
     echo "Using vLLM backend."
     echo "vLLM downloads/caches the Hugging Face model when the server starts."
+    ai-server-stop >/dev/null 2>&1 || true
     ai-vllm-start
     ;;
   *)

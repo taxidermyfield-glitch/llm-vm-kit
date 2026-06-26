@@ -7,6 +7,7 @@ STACK_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 AI_HOME="${AI_HOME:-/workspace/ai}"
 AI_ENV_FILE="${AI_ENV_FILE:-$AI_HOME/ai.env}"
 AI_REQUIRE_SYNC_CONFIG="${AI_REQUIRE_SYNC_CONFIG:-1}"
+AI_INSTALL_OPTIONAL_BACKENDS="${AI_INSTALL_OPTIONAL_BACKENDS:-1}"
 
 if [[ "$(id -u)" -eq 0 ]]; then
   SUDO=""
@@ -70,7 +71,7 @@ if [[ ! -f "$AI_ENV_FILE" ]]; then
 fi
 
 if [[ -f "$AI_ENV_FILE" || "$AI_REQUIRE_SYNC_CONFIG" != "1" ]]; then
-  for key in AI_MODEL_PRESET AI_BACKEND AI_HF_MODEL AI_MODEL_QUANT AI_MODEL AI_CONTEXT_LENGTH AI_HOME AI_PROJECTS OLLAMA_MODELS AI_HERMES_HOME AI_OPENCODE_HOME AI_SYSTEM_PROMPT_FILE AI_SYSTEM_PROMPT AI_MEMORY_DIR AI_MEMORY_FILE OLLAMA_HOST AI_LLAMA_HOST AI_LLAMA_PORT AI_OPENAI_BASE_URL AI_LLAMA_NGL AI_LLAMA_SPLIT_MODE AI_LLAMA_EXTRA_ARGS AI_VLLM_TENSOR_PARALLEL_SIZE AI_VLLM_DTYPE AI_VLLM_GPU_MEMORY_UTILIZATION AI_VLLM_EXTRA_ARGS AI_AGENT_TOOLSETS AI_TERMINAL_TIMEOUT AI_APPROVAL_MODE AI_BROWSER_CDP_URL AI_WEB_SEARCH_BACKEND AI_WEB_EXTRACT_BACKEND AI_REQUIRE_SYNC_CONFIG; do
+  for key in AI_MODEL_PRESET AI_BACKEND AI_HF_MODEL AI_MODEL_QUANT AI_MODEL AI_CONTEXT_LENGTH AI_HOME AI_PROJECTS AI_HERMES_HOME AI_OPENCODE_HOME AI_SYSTEM_PROMPT_FILE AI_SYSTEM_PROMPT AI_MEMORY_DIR AI_MEMORY_FILE AI_LLAMA_HOST AI_LLAMA_PORT AI_OPENAI_BASE_URL AI_LLAMA_NGL AI_LLAMA_SPLIT_MODE AI_LLAMA_EXTRA_ARGS AI_VLLM_TENSOR_PARALLEL_SIZE AI_VLLM_DTYPE AI_VLLM_GPU_MEMORY_UTILIZATION AI_VLLM_EXTRA_ARGS AI_AGENT_TOOLSETS AI_TERMINAL_TIMEOUT AI_APPROVAL_MODE AI_BROWSER_CDP_URL AI_WEB_SEARCH_BACKEND AI_WEB_EXTRACT_BACKEND AI_REQUIRE_SYNC_CONFIG AI_INSTALL_OPTIONAL_BACKENDS; do
     if [[ -n "${!key:-}" ]]; then
       set_env_value "$AI_ENV_FILE" "$key" "${!key}"
     fi
@@ -87,7 +88,6 @@ source "$STACK_DIR/lib/env.sh"
 $SUDO mkdir -p \
   "$AI_HOME" \
   "$AI_PROJECTS" \
-  "$OLLAMA_MODELS" \
   "$AI_HERMES_HOME" \
   "$AI_OPENCODE_HOME" \
   "$AI_HOME/logs"
@@ -335,11 +335,23 @@ install_vllm() {
   python3 -m pip install --upgrade vllm
 }
 
-if [[ "${AI_BACKEND:-llamacpp}" == "llamacpp" ]]; then
-  install_llama_cpp
-else
-  echo "Skipping llama.cpp install because AI_BACKEND=${AI_BACKEND}."
-fi
+install_optional_backend() {
+  local name="$1"
+  shift
+
+  echo "Attempting optional backend install: $name"
+  set +e
+  ( set -Eeuo pipefail; "$@" )
+  local status=$?
+  set -e
+
+  if [[ "$status" -eq 0 ]]; then
+    echo "Optional backend available: $name"
+  else
+    echo "Warning: optional backend install failed: $name" >&2
+    echo "You can rerun bootstrap after selecting that backend if you need it." >&2
+  fi
+}
 
 
 
@@ -376,8 +388,6 @@ install_browser_support() {
 
 install_browser_support
 
-echo "Skipping Ollama install/start; llama.cpp is the default backend."
-
 if ! command -v opencode >/dev/null 2>&1; then
   echo "Installing OpenCode..."
   export OPENCODE_INSTALL_DIR="/usr/local/bin"
@@ -413,12 +423,20 @@ hash -r
 
 case "${AI_BACKEND:-llamacpp}" in
   llamacpp)
+    echo "Installing required backend: llama.cpp"
     if ! command -v llama-server >/dev/null 2>&1; then
       install_llama_cpp
     fi
+    if [[ "$AI_INSTALL_OPTIONAL_BACKENDS" == "1" ]]; then
+      install_optional_backend vllm install_vllm
+    fi
     ;;
   vllm)
+    echo "Installing required backend: vLLM"
     install_vllm
+    if [[ "$AI_INSTALL_OPTIONAL_BACKENDS" == "1" ]]; then
+      install_optional_backend llama.cpp install_llama_cpp
+    fi
     ;;
   *)
     echo "Unsupported AI_BACKEND=${AI_BACKEND}. Expected llamacpp or vllm." >&2
@@ -429,15 +447,8 @@ esac
 echo "Configuring tools..."
 ai-configure
 
-echo "Configuring llama.cpp backend..."
-ai-configure
-
-if [[ "${AI_SKIP_PULL:-0}" != "1" ]]; then
-  echo "Starting configured model server..."
-  ai-pull
-else
-  echo "Skipping model server start/download because AI_SKIP_PULL=1"
-fi
+echo "Starting configured model server..."
+ai-pull
 
 ai-status
 
@@ -446,7 +457,7 @@ cat <<'MSG'
 Installed.
 
 Main commands:
-  ai-chat                 local chat through llama.cpp
+  ai-chat                 local chat through the selected model server
   ai-code                 repo coding agent through OpenCode
   ai-agent                autonomous worker through Hermes
   ai-model                show/change presets or custom Hugging Face models

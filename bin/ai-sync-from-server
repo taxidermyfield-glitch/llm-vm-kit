@@ -10,6 +10,7 @@ ai_sync_local_dirs
 
 echo "Checking dedicated server: ${AI_SYNC_REMOTE}:${AI_SYNC_REMOTE_ROOT}"
 ai_sync_validate_remote_root
+ai_sync_remote_dirs
 
 ai_sync_build_rsync_args 0
 
