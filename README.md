@@ -1,1547 +1,520 @@
 # llm-vm-kit
 
-`llm-vm-kit` is a portable setup kit for turning a fresh Ubuntu/CUDA GPU rental VM into a local AI workstation.
+Disposable GPU VM setup for local LLM chat, coding, agent work, and durable sync to a dedicated storage server.
 
-Default model preset: `llama-3.3-70b`, using `hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M` through llama.cpp.
+The intended pattern is:
 
-Alternate max-power preset: `hermes-405b`, using `NousResearch/Hermes-3-Llama-3.1-405B` through vLLM.
+1. Keep the GPU VM disposable.
+2. Keep projects, configs, memory, outputs, OpenCode state, and Hermes state on dedicated storage.
+3. Keep large model files VM-local, so every fresh GPU VM pulls the selected model for itself.
 
-After installation, you get three main commands:
-
-```bash
-ai-chat     # local ChatGPT-style terminal chat
-ai-code     # coding agent for working inside software repos
-ai-agent    # autonomous Hermes worker with browser, terminal, memory, and tool use
-```
-
-The intended workflow:
+Default model preset:
 
 ```text
-Rent a fresh CUDA VM
-→ clone this repo
-→ run bootstrap.sh
-→ pull one Hugging Face GGUF model
-→ use ai-chat, ai-code, and ai-agent from anywhere in the terminal
+mid-range  -> Llama 3.3 70B GGUF through llama.cpp, 32K context
 ```
 
+Alternate max-power preset:
 
-In the default sync-required mode, run `bin/ai-sync-from-server` first, then run `bootstrap.sh`. Bootstrap does not run sync.
+```text
+max-power  -> NousResearch/Hermes-3-Llama-3.1-405B through vLLM, 128K context
+```
 
-> Current backend: this toolkit uses `llama.cpp` / `llama-server` by default, not Ollama. `llama-server` exposes a local OpenAI-compatible endpoint at `http://127.0.0.1:18080/v1`.
-
-The VM is disposable. The setup logic lives in this repo. Runtime state, downloaded models, Hermes memory, browser state, and working projects live under `/workspace`.
+The 405B preset is intentionally guarded. It is a huge full-weight model and should only be selected on very large multi-GPU or multi-node hardware.
 
 ---
 
-# 1. What this project does
+# Mental model
 
-This project gives you a repeatable local-AI machine setup.
-
-Instead of manually setting up llama.cpp, OpenCode, Hermes, browser automation, model paths, configs, and shell commands every time you rent a GPU VM, this repo does it with one installer:
-
-```bash
-cp config/ai-sync.env.example config/ai-sync.env
-nano config/ai-sync.env
-bin/ai-sync-from-server
-sudo bash bootstrap.sh
-```
-
-After installation, these commands are available globally:
-
-```bash
-ai-chat
-ai-code
-ai-agent
-ai-model
-ai-pull
-ai-status
-ai-server-start
-ai-server-stop
-ai-vllm-start
-ai-vllm-stop
-set-system-prompt
-ai-memory
-ai-sync-from-server
-ai-sync-to-server
-ai-sync-status
-ai-configure
-ai-llama-start
-ai-llama-stop
-ai-llama.cpp-start
-ai-llama.cpp-stop
-ai-browser-start
-ai-browser-reset
-ai-backup
-```
-
-The three main modes are:
+There are three separate layers:
 
 ```text
-ai-chat   = simple local chat, like a terminal ChatGPT window
-ai-code   = repo-focused coding agent using OpenCode
-ai-agent  = autonomous worker using Hermes Agent with tools/browser/memory
+Git repo
+  Installer scripts and commands. Clone this on each VM.
+
+Dedicated storage server
+  Durable source of truth for projects, datasets, outputs, memory, prompts, and base config.
+
+GPU VM
+  Disposable machine that installs dependencies, downloads the selected model locally, runs chat/code/agent tools, then syncs state back.
 ```
+
+Important config files:
+
+```text
+/workspace/ai/ai.env
+  Active VM config. ai-model updates this file.
+
+/workspace/ai/persistent-config/ai.env.base
+  Synced base config. ai-sync-to-server writes this from ai.env with AI_LOCAL_MODEL removed.
+
+config/ai-sync.env
+  Local-only SSH settings for reaching the dedicated server. Do not commit it.
+
+config/ai.env.example
+  Template for the initial synced base config.
+```
+
+`bootstrap.sh` does not run sync. Sync first, choose the desired preset if needed, then bootstrap. Bootstrap installs requirements and pulls/starts the model selected in `/workspace/ai/ai.env`.
 
 ---
 
-# 2. What gets installed
+# Dedicated server setup
 
-The installer configures:
+Do this once on the storage server.
 
-```text
-llama.cpp     local model server
-vLLM          local server for safetensors presets such as Hermes 405B, when selected
-OpenCode      coding agent
-Hermes Agent  autonomous terminal/browser/tool agent
-Node.js       needed for JS tools and MCP servers
-uv / uvx      useful for Python MCP servers
-Google Chrome headless browser automation for Hermes
-```
-
-It also creates persistent runtime folders:
-
-```text
-/workspace/ai
-/workspace/projects
-```
-
----
-
-# 3. Directory layout
-
-The setup repo is usually cloned here:
-
-```bash
-/opt/llm-vm-kit
-```
-
-During development, it may be here:
-
-```bash
-~/llm-vm-kit
-```
-
-Runtime files live here:
-
-```text
-/workspace/ai/ai.env             main config file
-/workspace/ai/models             downloaded Hugging Face / llama.cpp model cache
-/workspace/ai/datasets           synced datasets
-/workspace/ai/outputs            synced outputs
-/workspace/ai/persistent-config  synced config copied from the dedicated server
-/workspace/ai/hermes             Hermes config, memory, sessions, env
-/workspace/ai/opencode           OpenCode config
-/workspace/ai/logs               llama.cpp and browser logs
-/workspace/projects              your actual project repos
-```
-
-Use `/workspace/projects` for normal work.
-
-Do not use the `llm-vm-kit` setup repo itself as your normal coding workspace.
-
-Correct:
-
-```bash
-cd /workspace/projects/my-project
-ai-code
-```
-
-Wrong:
-
-```bash
-cd ~/llm-vm-kit
-ai-code
-```
-
----
-
-# 4. Fresh VM install
-
-Start with a fresh Ubuntu/CUDA/PyTorch-style GPU rental VM.
-
-Install basic tools:
+Install the basic server tools:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git curl ca-certificates rsync openssh-client
+sudo apt-get install -y openssh-server rsync
 ```
 
-Clone this repo:
+Create a user and storage root:
 
 ```bash
-git clone https://github.com/taxidermyfield-glitch/llm-vm-kit.git /opt/llm-vm-kit
-cd /opt/llm-vm-kit
+sudo adduser ai
+sudo mkdir -p /srv/ai-persistent/{projects,datasets,outputs,config,memory,opencode,hermes,logs,sync}
+sudo chown -R ai:ai /srv/ai-persistent
+sudo chmod 750 /srv/ai-persistent
 ```
 
-Install the private sync key before bootstrap:
+Install the public SSH key that the GPU VMs will use:
 
 ```bash
-mkdir -p ~/.ssh
-nano ~/.ssh/ai_sync_ed25519
-chmod 600 ~/.ssh/ai_sync_ed25519
+sudo -u ai mkdir -p /home/ai/.ssh
+sudo -u ai nano /home/ai/.ssh/authorized_keys
+sudo chmod 700 /home/ai/.ssh
+sudo chmod 600 /home/ai/.ssh/authorized_keys
 ```
 
-Configure the local-only sync env in the cloned repo:
-
-```bash
-cp config/ai-sync.env.example config/ai-sync.env
-nano config/ai-sync.env
-```
-
-Example `config/ai-sync.env`:
-
-```bash
-AI_SYNC_REMOTE_USER="user"
-AI_SYNC_REMOTE_HOST="DEDICATED_IP"
-AI_SYNC_REMOTE_PORT="22"
-AI_SYNC_REMOTE_ROOT="/srv/ai-persistent"
-AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519"
-AI_SYNC_LOCAL_ROOT="/workspace"
-AI_SYNC_AI_HOME="/workspace/ai"
-AI_SYNC_DELETE="0"
-```
-
-Pull current projects/config/memory/output state from dedicated storage:
-
-```bash
-bin/ai-sync-from-server
-```
-
-This creates `/workspace/ai/ai.env` from `/srv/ai-persistent/config/ai.env.base` and removes any stale `AI_LOCAL_MODEL`, because the local model path belongs only to the current GPU VM.
-
-Optional: change the preset before downloading any model:
-
-```bash
-bin/ai-model mid-range
-# or
-bin/ai-model max-power
-```
-
-If you changed the preset and want dedicated storage to remember it for future VMs:
-
-```bash
-bin/ai-sync-to-server
-```
-
-Now run bootstrap:
-
-```bash
-sudo bash bootstrap.sh
-```
-
-Bootstrap does not run sync. It expects `/workspace/ai/ai.env` to already exist. It will:
+Only the public key goes in `authorized_keys`. The matching private key lives on each GPU VM, usually at:
 
 ```text
-install system packages
-install Node.js
-install the selected model backend requirements
-install OpenCode
-install Hermes Agent
-install Google Chrome for browser automation
-install the ai-* commands into /usr/local/bin
-download/cache the configured Hugging Face model locally
-start the configured OpenAI-compatible model server
-serve the model through a local OpenAI-compatible endpoint using the model name local-ai
+~/.ssh/ai_sync_ed25519
 ```
 
-By default, bootstrap requires synced config. It will not create `/workspace/ai/ai.env` from the repo example unless you explicitly opt out:
+The private key should not live in the GitHub repo.
+
+Create the initial synced model/config preset:
 
 ```bash
-sudo AI_REQUIRE_SYNC_CONFIG=0 bash bootstrap.sh
+sudo -u ai nano /srv/ai-persistent/config/ai.env.base
 ```
 
-After install:
-
-```bash
-ai-status
-```
-
----
-
-# 5. Fast install test without model download
-
-Model downloads can take a while. To test the installer quickly without pulling a model:
-
-```bash
-cd /opt/llm-vm-kit
-bin/ai-sync-from-server
-sudo AI_SKIP_PULL=1 bash bootstrap.sh
-```
-
-Then later pull the model:
-
-```bash
-ai-pull
-```
-
----
-
-# 6. Install with a custom model immediately
-
-In sync-required mode, model presets come from dedicated storage, but you can switch them on a fresh VM before bootstrap downloads any model.
-
-Built-in presets:
-
-```text
-llama-3.3-70b   mid-range default, llama.cpp + GGUF, 32K context
-hermes-405b     max-power default, vLLM + full BF16 safetensors, 32K context preset, 128K architecture support
-```
-
-After `bin/ai-sync-from-server`, switch the local synced config to Hermes 405B before bootstrap:
-
-```bash
-bin/ai-model hermes-405b
-```
-
-That command prints a hardware warning and asks you to type `405B` before changing the config.
-
-The `hermes-405b` preset is intentionally the maximum-power option. The Hugging Face model card lists BF16 tensors and says the model needs over 800GB of VRAM to load before KV cache, runtime overhead, long-context memory, or batching. Use it only on a very large multi-GPU or multi-node VM.
-
-Switch back to the normal 70B default before bootstrap:
-
-```bash
-bin/ai-model llama-3.3-70b
-```
-
-Persist the preset choice back to dedicated storage so future VMs inherit it:
-
-```bash
-bin/ai-sync-to-server
-```
-
-You can also edit the synced config manually:
-
-```bash
-nano /workspace/ai/ai.env
-```
-
-70B default values:
+Start with the mid-range default:
 
 ```bash
 AI_MODEL_PRESET="llama-3.3-70b"
 AI_BACKEND="llamacpp"
 AI_HF_MODEL="hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M"
 AI_MODEL_QUANT="Q4_K_M"
-AI_CONTEXT_LENGTH="32768"
-```
-
-Hermes 405B max-power values:
-
-```bash
-AI_MODEL_PRESET="hermes-3-llama-3.1-405b"
-AI_BACKEND="vllm"
-AI_HF_MODEL="NousResearch/Hermes-3-Llama-3.1-405B"
-AI_CONTEXT_LENGTH="32768"
-AI_VLLM_TENSOR_PARALLEL_SIZE="16"
-AI_VLLM_DTYPE="bfloat16"
-```
-
-Bootstrap syncs this config down first, then `ai-pull` downloads the matching VM-local model.
-
-For custom models:
-
-```bash
-ai-model mid-range
-ai-model max-power
-ai-model hf.co/OWNER/GGUF-REPO:Q4_K_M
-ai-model --backend vllm OWNER/REPO
-```
-
----
-
-# 7. Main config file
-
-The main config file is:
-
-```bash
-/workspace/ai/ai.env
-```
-
-View it:
-
-```bash
-cat /workspace/ai/ai.env
-```
-
-Edit it:
-
-```bash
-sudo nano /workspace/ai/ai.env
-```
-
-Save in nano:
-
-```text
-Ctrl+O
-Enter
-Ctrl+X
-```
-
-Important lines:
-
-```bash
-AI_MODEL_PRESET="llama-3.3-70b"
-AI_BACKEND="llamacpp"
-AI_HF_MODEL="hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M"
 AI_MODEL="local-ai"
 AI_CONTEXT_LENGTH="32768"
 AI_OPENAI_BASE_URL="http://127.0.0.1:18080/v1"
+
+AI_HOME="/workspace/ai"
+AI_PROJECTS="/workspace/projects"
+AI_HERMES_HOME="/workspace/ai/hermes"
+AI_OPENCODE_HOME="/workspace/ai/opencode"
 AI_SYSTEM_PROMPT_FILE="/workspace/ai/persistent-config/system-prompt.txt"
 AI_MEMORY_FILE="/workspace/ai/persistent-config/memory/active.md"
-AI_AUTO_BROWSER="1"
-AI_BROWSER_CDP_URL="http://127.0.0.1:9222"
 ```
 
-Meaning:
-
-```text
-AI_MODEL_PRESET     selected built-in preset or custom
-AI_BACKEND          serving backend: llamacpp or vllm
-AI_HF_MODEL         Hugging Face model to serve
-AI_MODEL            model name exposed to OpenAI-compatible clients
-AI_CONTEXT_LENGTH   context window size
-AI_SYSTEM_PROMPT_FILE persistent system prompt file used by ai-chat
-AI_MEMORY_FILE      manual shared memory file loaded by ai-chat
-AI_AUTO_BROWSER     whether ai-agent auto-starts headless Chrome
-AI_BROWSER_CDP_URL  local Chrome DevTools browser endpoint
-```
-
-Normally leave this unchanged:
-
-```bash
-AI_MODEL="local-ai"
-```
-
-Usually you only edit:
-
-```bash
-AI_HF_MODEL
-AI_CONTEXT_LENGTH
-AI_OPENAI_BASE_URL
-```
+That file is the dedicated server's base config. Fresh VMs pull it down as `/workspace/ai/ai.env`.
 
 ---
 
-# 8. Hugging Face model formats
+# Fresh GPU VM workflow
 
-This toolkit supports two local serving backends:
+Do this each time you create a new Vast or other GPU VM.
 
-```text
-llamacpp  Hugging Face GGUF models
-vllm      Hugging Face safetensors models
-```
-
-The default preset uses **llama.cpp** with a Hugging Face **GGUF** model.
-
-Correct llama.cpp format in `/workspace/ai/ai.env`:
+Install the small set of tools needed before bootstrap:
 
 ```bash
-AI_HF_MODEL="hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M"
+sudo apt-get update
+sudo apt-get install -y git rsync openssh-client
 ```
 
-For llama.cpp internals, the toolkit converts this to:
-
-```bash
-OWNER/REPO:QUANT
-```
-
-Examples:
+Install the private SSH key for sync:
 
 ```bash
-hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M
-hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q6_K
-hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q8_0
-hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:BF16
+install -m 700 -d ~/.ssh
+nano ~/.ssh/ai_sync_ed25519
+chmod 600 ~/.ssh/ai_sync_ed25519
 ```
 
-Incorrect:
-
-```bash
-HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive
-```
-
-Correct:
+Test SSH:
 
 ```bash
-hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M
+ssh -i ~/.ssh/ai_sync_ed25519 ai@DEDICATED_IP 'echo sync-ok'
 ```
 
-If a short quant tag does not work, use the exact `.gguf` filename from the Hugging Face file list:
+Clone the toolkit:
 
 ```bash
-hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf
-```
-
----
-
-# 9. How to choose a Hugging Face GGUF model
-
-On a Hugging Face model page, look for downloadable files ending in:
-
-```text
-.gguf
-```
-
-Common examples:
-
-```text
-model-Q4_K_M.gguf
-model-Q5_K_M.gguf
-model-Q6_K.gguf
-model-Q8_0.gguf
-model-BF16.gguf
-```
-
-Use the quantization after the final dash.
-
-Example file:
-
-```text
-Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf
-```
-
-Use:
-
-```bash
-:Q4_K_M
-```
-
-Full model string:
-
-```bash
-hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M
-```
-
-If you see a table like this:
-
-```text
-BF16     17 GB
-Q8_0     8.9 GB
-Q6_K     6.9 GB
-Q4_K_M   5.3 GB
-```
-
-then valid model strings are:
-
-```bash
-hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:BF16
-hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q8_0
-hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q6_K
-hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M
-```
-
----
-
-# 10. Quantization guide
-
-Quantization controls size, speed, and quality.
-
-```text
-Q4_K_M   best default; smaller, faster, lower VRAM
-Q5_K_M   better quality if available, more VRAM
-Q6_K     better quality, more VRAM
-Q8_0     high quality, slower, much more VRAM
-BF16     largest, highest memory requirement
-```
-
-Recommended default:
-
-```bash
-Q4_K_M
-```
-
-Recommended for stronger quality if the GPU can handle it:
-
-```bash
-Q6_K
-```
-
-Avoid unless you have a large GPU:
-
-```bash
-Q8_0
-BF16
-```
-
----
-
-# 11. Changing the model
-
-## Method 1: use ai-model
-
-```bash
-ai-model llama-3.3-70b
-ai-model hermes-405b
-ai-model hf.co/OWNER/GGUF-REPO:Q4_K_M
-ai-model --backend vllm OWNER/REPO
-```
-
-This updates `/workspace/ai/ai.env` and clears stale `AI_LOCAL_MODEL`. Run `ai-pull` afterward when you are ready to download/start the selected backend, or use `ai-model MODEL --pull`.
-
-## Method 2: edit manually
-
-```bash
-sudo nano /workspace/ai/ai.env
-```
-
-Change:
-
-```bash
-AI_MODEL_PRESET="llama-3.3-70b"
-AI_BACKEND="llamacpp"
-AI_HF_MODEL="hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M"
-AI_CONTEXT_LENGTH="32768"
-```
-
-Then apply:
-
-```bash
-ai-pull
-```
-
-Confirm:
-
-```bash
-ai-status
-```
-
----
-
-# 12. Changing context length
-
-Context length controls how much text the model can keep in memory.
-
-Higher context is useful for coding and autonomous agents, but it is slower and uses more VRAM.
-
-Edit:
-
-```bash
-sudo nano /workspace/ai/ai.env
-```
-
-Fast chat:
-
-```bash
-AI_CONTEXT_LENGTH="8192"
-```
-
-Balanced coding:
-
-```bash
-AI_CONTEXT_LENGTH="8192"
-```
-
-Heavier coding or agent work:
-
-```bash
-AI_CONTEXT_LENGTH="8192"
-```
-
-Maximum agent context, if your GPU can handle it:
-
-```bash
-AI_CONTEXT_LENGTH="8192"
-```
-
-After changing context length:
-
-```bash
-ai-llama-stop
-ai-pull
-```
-
-Check:
-
-```bash
-ai-status
-```
-
----
-
-# 13. Main commands
-
-## ai-chat
-
-Start local chat:
-
-```bash
-ai-chat
-```
-
-This opens an interactive chat session against the configured local model server.
-
-One-shot prompt:
-
-```bash
-ai-chat "Explain what this toolkit does."
-```
-
-Exit chat:
-
-```text
-/bye
-Ctrl+D
-Ctrl+C
-```
-
----
-
-## set-system-prompt
-
-Set the system prompt used by `ai-chat`:
-
-```bash
-set-system-prompt "You are concise, careful, and direct."
-```
-
-Multi-line prompt:
-
-```bash
-cat > /tmp/system-prompt.txt
-set-system-prompt < /tmp/system-prompt.txt
-```
-
-Show or clear it:
-
-```bash
-set-system-prompt --show
-set-system-prompt --clear
-```
-
-The prompt is stored at `/workspace/ai/persistent-config/system-prompt.txt`, so `ai-sync-to-server` persists it.
-
----
-
-## ai-memory
-
-Manage manual shared memory loaded by `ai-chat`:
-
-```bash
-ai-memory add "Models are VM-local and should not be synced."
-ai-memory show
-ai-memory edit 1 "Models are VM-local; never sync model weights."
-ai-memory remove 1
-```
-
-Open the memory file in your editor:
-
-```bash
-ai-memory edit
-```
-
-The active memory file is:
-
-```text
-/workspace/ai/persistent-config/memory/active.md
-```
-
-It is deliberately manual. `ai-chat` reads it at startup and injects it as user-approved durable context; `ai-sync-to-server` persists it.
-
----
-
-## ai-code
-
-Use this inside a project repo.
-
-Create a workspace:
-
-```bash
-mkdir -p /workspace/projects
-cd /workspace/projects
-```
-
-Clone or create a repo:
-
-```bash
-git clone https://github.com/some-user/some-project.git
-cd some-project
-```
-
-Start the coding agent:
-
-```bash
-ai-code
-```
-
-One-shot task:
-
-```bash
-ai-code "Inspect this repo and tell me how to run it."
-```
-
-Do not run `ai-code` from the `llm-vm-kit` setup repo itself.
-
-Correct:
-
-```bash
-cd /workspace/projects/your-repo
-ai-code
-```
-
-Wrong:
-
-```bash
-cd ~/llm-vm-kit
-ai-code
-```
-
----
-
-## ai-agent
-
-Start Hermes Agent:
-
-```bash
-ai-agent
-```
-
-This automatically starts:
-
-```text
-llama.cpp
-headless Chrome browser automation
-Hermes Agent
-```
-
-You do not need to manually run:
-
-```bash
-ai-browser-start
-```
-
-Example prompt inside Hermes:
-
-```text
-Navigate to https://example.com and summarize the page using the browser.
-```
-
-One-shot task:
-
-```bash
-ai-agent "Use local tools to inspect /workspace/projects and summarize what is there."
-```
-
----
-
-# 14. Browser automation
-
-`ai-agent` automatically starts browser automation.
-
-Manual browser commands are only for debugging.
-
-Start browser manually:
-
-```bash
-ai-browser-start
-```
-
-Reset browser:
-
-```bash
-ai-browser-reset
-```
-
-Check browser endpoint:
-
-```bash
-grep -E 'AI_BROWSER_CDP_URL|BROWSER_CDP_URL' /workspace/ai/ai.env /workspace/ai/hermes/.env
-```
-
-Expected:
-
-```text
-AI_BROWSER_CDP_URL="http://127.0.0.1:9222"
-BROWSER_CDP_URL="http://127.0.0.1:9222"
-```
-
-If browser tools get flaky:
-
-```bash
-ai-browser-reset
-ai-agent
-```
-
-Check browser logs:
-
-```bash
-cat /workspace/ai/logs/browser.log
-```
-
----
-
-# 15. Status and diagnostics
-
-Check the whole stack:
-
-```bash
-ai-status
-```
-
-Check GPU:
-
-```bash
-nvidia-smi
-```
-
-Check llama-server logs:
-
-```bash
-cat /workspace/ai/logs/llama-server.log
-```
-
-Check browser logs:
-
-```bash
-cat /workspace/ai/logs/browser.log
-```
-
-Check llama.cpp OpenAI-compatible model endpoint:
-
-```bash
-curl http://127.0.0.1:18080/v1/models
-```
-
-Check llama-server process:
-
-```bash
-ps aux | grep llama-server | grep -v grep
-```
-
-Check current config:
-
-```bash
-cat /workspace/ai/ai.env
-```
-
----
-
-# 16. Persistent sync with a dedicated server
-
-Use this when the GPU VM is disposable but projects, datasets, outputs, configs, OpenCode state, and Hermes state need to survive VM deletion.
-
-The design rule:
-
-```text
-Vast VM = disposable compute
-Dedicated server = persistent storage
-Models = local-only on the current VM
-```
-
-## Dedicated server setup
-
-Run this on the dedicated server:
-
-```bash
-sudo mkdir -p /srv/ai-persistent/{projects,datasets,outputs,config,memory,opencode,hermes,logs,sync}
-sudo chown -R "$USER:$USER" /srv/ai-persistent
-chmod -R 775 /srv/ai-persistent
-```
-
-Create an SSH key for sync access from Vast VMs:
-
-```bash
-ssh-keygen -t ed25519 -f ~/.ssh/ai_sync_ed25519 -C "vast-ai-sync"
-```
-
-Add the public key to the dedicated server user's `~/.ssh/authorized_keys`.
-
-Required base config on the dedicated server:
-
-```bash
-nano /srv/ai-persistent/config/ai.env.base
-```
-
-Do not include `AI_LOCAL_MODEL` in `ai.env.base`; that path belongs to the current VM and is regenerated by `ai-pull`.
-
-## Vast VM sync config
-
-The sync connection settings live in a local-only repo file:
-
-```bash
-/opt/llm-vm-kit/config/ai-sync.env
-```
-
-Create it from the example:
-
-```bash
+sudo mkdir -p /opt
+sudo chown "$USER:$USER" /opt
+git clone https://github.com/YOUR_USERNAME/llm-vm-kit.git /opt/llm-vm-kit
 cd /opt/llm-vm-kit
+```
+
+Create the VM-local sync env:
+
+```bash
 cp config/ai-sync.env.example config/ai-sync.env
 nano config/ai-sync.env
 ```
 
-Example:
+Set these values:
 
 ```bash
-AI_SYNC_REMOTE_USER="user"
+AI_SYNC_REMOTE_USER="ai"
 AI_SYNC_REMOTE_HOST="DEDICATED_IP"
 AI_SYNC_REMOTE_PORT="22"
 AI_SYNC_REMOTE_ROOT="/srv/ai-persistent"
 AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519"
 AI_SYNC_LOCAL_ROOT="/workspace"
 AI_SYNC_AI_HOME="/workspace/ai"
-AI_SYNC_DELETE="0"
 ```
 
-Do not put these SSH connection settings in `/srv/ai-persistent/config/ai.env.base`. They are local to each VM.
-
-Install the SSH key on the VM:
-
-```bash
-mkdir -p ~/.ssh
-nano ~/.ssh/ai_sync_ed25519
-chmod 600 ~/.ssh/ai_sync_ed25519
-```
-
-Test the connection:
-
-```bash
-ssh -i ~/.ssh/ai_sync_ed25519 user@DEDICATED_IP 'echo connected'
-```
-
-## Sync commands
-
-Pull persistent state onto a new VM:
+Pull durable state and config from the dedicated server:
 
 ```bash
 bin/ai-sync-from-server
 ```
 
-This pulls projects, datasets, outputs, OpenCode state, Hermes state, and config. If `/srv/ai-persistent/config/ai.env.base` exists, it is copied to `/workspace/ai/ai.env`, then any stale `AI_LOCAL_MODEL` line is removed.
-
-Before bootstrap, run sync commands as `bin/ai-sync-*` from the cloned repo. After bootstrap, they are installed globally as `ai-sync-*`.
-
-Push persistent state before destroying a VM:
-
-```bash
-ai-sync-to-server
-```
-
-This regenerates `/workspace/ai/persistent-config/ai.env.base` from `/workspace/ai/ai.env` without `AI_LOCAL_MODEL`, then uploads persistent state and writes:
-
-```text
-/srv/ai-persistent/sync/last-sync-to-server.txt
-```
-
-Preview upload differences:
-
-```bash
-ai-sync-status
-```
-
-Preview download differences:
-
-```bash
-ai-sync-status from-server
-```
-
-## What is synced
-
-From dedicated server to VM:
-
-```text
-/srv/ai-persistent/projects/  -> /workspace/projects/
-/srv/ai-persistent/datasets/  -> /workspace/ai/datasets/
-/srv/ai-persistent/outputs/   -> /workspace/ai/outputs/
-/srv/ai-persistent/opencode/  -> /workspace/ai/opencode/
-/srv/ai-persistent/hermes/    -> /workspace/ai/hermes/
-/srv/ai-persistent/config/    -> /workspace/ai/persistent-config/
-```
-
-From VM to dedicated server:
-
-```text
-/workspace/projects/             -> /srv/ai-persistent/projects/
-/workspace/ai/datasets/          -> /srv/ai-persistent/datasets/
-/workspace/ai/outputs/           -> /srv/ai-persistent/outputs/
-/workspace/ai/opencode/          -> /srv/ai-persistent/opencode/
-/workspace/ai/hermes/            -> /srv/ai-persistent/hermes/
-/workspace/ai/persistent-config/ -> /srv/ai-persistent/config/
-```
-
-## Local-only data
-
-These are intentionally excluded:
-
-```text
-/workspace/ai/models/
-/workspace/ai/llama-cache/
-/workspace/tmp/
-node_modules/
-.venv/
-__pycache__/
-.git/lfs/tmp/
-.cache/
-dist/
-build/
-target/
-*.gguf
-*.safetensors
-*.pt
-*.pth
-*.bin
-```
-
-Models are large, redownloadable, and faster from local VM disk. Sync pulls the model preset/config first; bootstrap later runs `ai-pull` and downloads the selected model locally.
-
-## New Vast VM workflow
-
-```bash
-sudo apt-get update
-sudo apt-get install -y git curl ca-certificates rsync openssh-client
-
-mkdir -p ~/.ssh
-nano ~/.ssh/ai_sync_ed25519
-chmod 600 ~/.ssh/ai_sync_ed25519
-
-git clone https://github.com/YOUR_USERNAME/llm-vm-kit.git /opt/llm-vm-kit
-cd /opt/llm-vm-kit
-
-cp config/ai-sync.env.example config/ai-sync.env
-nano config/ai-sync.env
-
-bin/ai-sync-from-server
-```
-
-Optionally switch presets before any model download:
+Optional: switch model preset before bootstrap pulls anything:
 
 ```bash
 bin/ai-model mid-range
-# or
 bin/ai-model max-power
 ```
 
-If you changed presets, persist that selected preset back to dedicated storage:
+For `max-power`, read the warning and type `405B` when prompted. For non-interactive scripts, use `--yes`.
+
+If you changed the preset and want future VMs to inherit it:
 
 ```bash
 bin/ai-sync-to-server
 ```
 
-Then install dependencies and pull/start the selected model:
+Install dependencies and pull/start the selected model:
 
 ```bash
 sudo bash bootstrap.sh
 ```
 
-Bootstrap does not run sync. It requires `/workspace/ai/ai.env` to already exist from `bin/ai-sync-from-server`.
-
-## Delete policy
-
-The default is safe:
-
-```bash
-AI_SYNC_DELETE="0"
-```
-
-With this default, `ai-sync-to-server` does not delete server files that are missing locally. Only set this when you intentionally want mirror behavior:
-
-```bash
-AI_SYNC_DELETE="1"
-```
-
-Run `ai-sync-status` before using delete mode.
-
-## Disposal checklist
-
-Before destroying a Vast VM:
-
-```bash
-ai-server-stop
-ai-sync-to-server
-sync
-```
-
-Confirm the latest server sync timestamp:
-
-```bash
-ssh user@DEDICATED_IP 'cat /srv/ai-persistent/sync/last-sync-to-server.txt'
-```
-
-This sync architecture assumes one active writable VM per persistent workspace. If two VMs push the same files, the last sync can overwrite earlier work.
-
----
-
-# 17. Backup and restore
-
-Back up runtime state:
-
-```bash
-ai-backup
-```
-
-This prints an archive path like:
-
-```text
-/workspace/ai-vm-state-20260624-120000.tgz
-```
-
-Copy that archive to another VM.
-
-Restore on another VM:
-
-```bash
-cd /workspace
-tar -xzf ai-vm-state-*.tgz
-```
-
-Then reinstall the toolkit:
-
-```bash
-git clone https://github.com/YOUR_USERNAME/llm-vm-kit.git /opt/llm-vm-kit
-cd /opt/llm-vm-kit
-cp config/ai-sync.env.example config/ai-sync.env
-nano config/ai-sync.env
-bin/ai-sync-from-server
-sudo bash bootstrap.sh
-```
-
-This restores:
-
-```text
-/workspace/ai/ai.env
-/workspace/ai/models
-/workspace/ai/hermes
-/workspace/ai/opencode
-/workspace/projects
-```
-
----
-
-# 18. Updating this toolkit repo
-
-If you edit scripts or README:
-
-```bash
-cd /opt/llm-vm-kit
-```
-
-or:
-
-```bash
-cd ~/llm-vm-kit
-```
-
-Run smoke test:
-
-```bash
-bash tools/smoke-test.sh
-```
-
-Commit and push:
-
-```bash
-git status
-git add .
-git commit -m "update toolkit"
-git push
-```
-
----
-
-# 19. Fresh VM test after pushing
-
-On a new VM:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y git curl ca-certificates
-```
-
-Clone:
-
-```bash
-git clone https://github.com/YOUR_USERNAME/llm-vm-kit.git /opt/llm-vm-kit
-cd /opt/llm-vm-kit
-```
-
-Fast install test:
-
-```bash
-cp config/ai-sync.env.example config/ai-sync.env
-nano config/ai-sync.env
-bin/ai-sync-from-server
-sudo AI_SKIP_PULL=1 bash bootstrap.sh
-```
-
-Full install:
-
-```bash
-bin/ai-sync-from-server
-sudo bash bootstrap.sh
-```
-
-Test commands:
+Check the machine:
 
 ```bash
 ai-status
-ai-chat
-ai-code
-ai-agent
+ai-chat "Say hello from the selected local model."
 ```
 
 ---
 
-# 20. GitHub authentication notes
+# Model presets
 
-GitHub does not accept normal account passwords for Git pushes.
-
-Use one of:
-
-```text
-GitHub CLI auth
-Personal Access Token
-SSH key
-```
-
-With GitHub CLI and a token:
-
-```bash
-gh auth login --with-token
-```
-
-Then:
-
-```bash
-gh auth status
-gh auth setup-git
-```
-
-For this repo, if using a classic GitHub token, common permissions are:
-
-```text
-public_repo
-workflow
-```
-
-`workflow` matters because this repo may include files under:
-
-```text
-.github/workflows/
-```
-
----
-
-# 21. Security notes
-
-Do not commit:
-
-```text
-GitHub tokens
-Hugging Face tokens
-API keys
-browser cookies
-model files
-/workspace/ai/hermes/.env
-/workspace/ai/models
-```
-
-Keep secrets in:
-
-```bash
-/workspace/ai/hermes/.env
-```
-
-This repo should contain setup scripts only, not private runtime state.
-
----
-
-# 22. Troubleshooting
-
-## ai-chat is slow
-
-Use a smaller context:
-
-```bash
-sudo nano /workspace/ai/ai.env
-```
-
-Set:
-
-```bash
-AI_CONTEXT_LENGTH="8192"
-```
-
-Then:
-
-```bash
-ai-llama-stop
-ai-pull
-```
-
-Use a Q4 model:
-
-```bash
-:Q4_K_M
-```
-
----
-
-## Model does not pull
-
-Check format.
-
-Correct:
-
-```bash
-hf.co/OWNER/REPO:Q4_K_M
-```
-
-Incorrect:
-
-```bash
-OWNER/REPO
-```
-
-Also confirm the Hugging Face repo has `.gguf` files.
-
----
-
-## Browser automation fails
-
-Reset:
-
-```bash
-ai-browser-reset
-ai-agent
-```
-
-Check logs:
-
-```bash
-cat /workspace/ai/logs/browser.log
-```
-
-Check Chrome:
-
-```bash
-google-chrome --version
-```
-
----
-
-## llama-server is not running
-
-Start it:
-
-```bash
-ai-llama.cpp-start
-```
-
-Check:
-
-```bash
-curl http://127.0.0.1:18080/v1/models
-```
-
----
-
-## GPU is not used
-
-Check:
-
-```bash
-nvidia-smi
-```
-
-While the model is generating, run:
-
-```bash
-nvidia-smi
-```
-
-If GPU memory is not being used, your VM may not have GPU access or the CUDA template may be wrong.
-
----
-
-## Ran ai-code in the wrong directory
-
-Stop it:
-
-```text
-Ctrl+C
-```
-
-If you are in a Git repo and have commits:
-
-```bash
-git reset --hard HEAD
-git clean -fd
-```
-
-If you had no commits, Git cannot restore the previous state. Recreate from backup or from the setup repo.
-
-Going forward, run `ai-code` only inside:
-
-```bash
-/workspace/projects/your-project
-```
-
----
-
-# 23. Quick reference
-
-Install:
-
-```bash
-git clone https://github.com/YOUR_USERNAME/llm-vm-kit.git /opt/llm-vm-kit
-cd /opt/llm-vm-kit
-cp config/ai-sync.env.example config/ai-sync.env
-nano config/ai-sync.env
-bin/ai-sync-from-server
-sudo bash bootstrap.sh
-```
-
-Skip model pull:
-
-```bash
-bin/ai-sync-from-server
-sudo AI_SKIP_PULL=1 bash bootstrap.sh
-```
-
-Show or change model:
+Use `ai-model` to inspect or change model config:
 
 ```bash
 ai-model
-ai-model llama-3.3-70b
-ai-model hermes-405b
+ai-model --list-presets
+ai-model mid-range
 ai-model max-power
 ai-model hf.co/OWNER/GGUF-REPO:Q4_K_M
+ai-model --backend vllm OWNER/REPO
 ```
 
-Edit config:
+By default, `ai-model` only updates config. It does not download or restart a model server.
+
+To change config and immediately apply it on an already bootstrapped VM:
 
 ```bash
-sudo nano /workspace/ai/ai.env
+ai-model mid-range --pull
+ai-model max-power --pull
 ```
 
-Use chat:
+Preset source of truth:
+
+```text
+bin/ai-model
+```
+
+The built-in preset blocks in that file update `/workspace/ai/ai.env`.
+
+Current built-in values:
+
+```text
+mid-range
+  AI_MODEL_PRESET="llama-3.3-70b"
+  AI_BACKEND="llamacpp"
+  AI_HF_MODEL="hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M"
+  AI_MODEL_QUANT="Q4_K_M"
+  AI_CONTEXT_LENGTH="32768"
+
+max-power
+  AI_MODEL_PRESET="hermes-3-llama-3.1-405b"
+  AI_BACKEND="vllm"
+  AI_HF_MODEL="NousResearch/Hermes-3-Llama-3.1-405B"
+  AI_CONTEXT_LENGTH="131072"
+  AI_VLLM_TENSOR_PARALLEL_SIZE="16"
+  AI_VLLM_DTYPE="bfloat16"
+```
+
+After changing a preset, run this if the dedicated server should remember it:
 
 ```bash
-set-system-prompt "You are concise, careful, and direct."
-ai-memory add "User prefers sync-required bootstrap and VM-local model files."
+ai-sync-to-server
+```
+
+Model files are intentionally not synced. `AI_LOCAL_MODEL` is stripped from synced config because it points to a VM-local downloaded file.
+
+---
+
+# Sync workflow
+
+Before work, pull the latest dedicated-server state:
+
+```bash
+ai-sync-status from-server
+ai-sync-from-server
+```
+
+After work, push durable changes back:
+
+```bash
+ai-sync-status to-server
+ai-sync-to-server
+```
+
+Run `ai-sync-to-server` after changing any durable state:
+
+```text
+model preset
+system prompt
+manual shared memory
+projects
+datasets
+outputs
+OpenCode state
+Hermes state
+```
+
+Synced paths:
+
+```text
+/workspace/projects/              <-> /srv/ai-persistent/projects/
+/workspace/ai/datasets/           <-> /srv/ai-persistent/datasets/
+/workspace/ai/outputs/            <-> /srv/ai-persistent/outputs/
+/workspace/ai/opencode/           <-> /srv/ai-persistent/opencode/
+/workspace/ai/hermes/             <-> /srv/ai-persistent/hermes/
+/workspace/ai/persistent-config/  <-> /srv/ai-persistent/config/
+```
+
+Not synced:
+
+```text
+model weights: *.gguf, *.safetensors, *.pt, *.pth, *.bin
+/workspace/ai/models/
+/workspace/ai/llama-cache/
+node_modules, build outputs, Python caches, virtualenvs
+```
+
+`AI_SYNC_DELETE=0` is the default and safest mode. Set `AI_SYNC_DELETE=1` only when you intentionally want rsync delete behavior.
+
+---
+
+# Chat, coding, and agent commands
+
+Chat with the selected local model:
+
+```bash
 ai-chat
+ai-chat "Summarize this repo."
 ```
 
-Use coding agent:
+Run OpenCode against a project:
 
 ```bash
-cd /workspace/projects/your-repo
+cd /workspace/projects/my-project
 ai-code
+ai-code "Fix the failing tests."
 ```
 
-Use autonomous agent:
+Run Hermes Agent:
 
 ```bash
 ai-agent
+ai-agent "Inspect /workspace/projects/my-project and report risks."
 ```
 
-Check status:
+Browser automation for Hermes:
+
+```bash
+ai-browser-start
+ai-browser-reset
+```
+
+Server controls:
+
+```bash
+ai-pull          # download/start selected backend
+ai-server-start
+ai-server-stop
+ai-llama-start
+ai-llama-stop
+ai-vllm-start
+ai-vllm-stop
+```
+
+Diagnostics:
 
 ```bash
 ai-status
 ```
 
-Backup:
+---
+
+# System prompt and shared memory
+
+System prompt:
 
 ```bash
-ai-backup
+set-system-prompt "You are concise, careful, and direct."
+set-system-prompt --show
+set-system-prompt --clear
+```
+
+Manual shared memory:
+
+```bash
+ai-memory show
+ai-memory add "User prefers sync-first bootstrap workflows."
+ai-memory edit 1 "Updated memory text."
+ai-memory remove 1
+ai-memory clear
+ai-memory path
+```
+
+Memory is manual by design. The toolkit does not automatically write memories from chats. `ai-chat` injects approved bullet items from:
+
+```text
+/workspace/ai/persistent-config/memory/active.md
+```
+
+Hermes Agent also keeps its own state under:
+
+```text
+/workspace/ai/hermes/
+```
+
+Both are synced through the dedicated server when you run `ai-sync-to-server`.
+
+---
+
+# Updating the toolkit
+
+On a VM:
+
+```bash
+cd /opt/llm-vm-kit
+git pull --ff-only
+sudo bash bootstrap.sh
+```
+
+If you changed durable config or state before updating:
+
+```bash
+ai-sync-to-server
+git pull --ff-only
+bin/ai-sync-from-server
+sudo bash bootstrap.sh
+```
+
+---
+
+# Troubleshooting
+
+Bootstrap says `/workspace/ai/ai.env` is missing:
+
+```bash
+cd /opt/llm-vm-kit
+bin/ai-sync-from-server
+sudo bash bootstrap.sh
+```
+
+If the dedicated server is new, create `/srv/ai-persistent/config/ai.env.base` first.
+
+Sync SSH fails:
+
+```bash
+chmod 600 ~/.ssh/ai_sync_ed25519
+ssh -i ~/.ssh/ai_sync_ed25519 ai@DEDICATED_IP 'echo ok'
+cat config/ai-sync.env
+```
+
+Model pull fails:
+
+```bash
+ai-status
+ai-server-stop
+ai-pull
+```
+
+For private Hugging Face models, log in first:
+
+```bash
+hf auth login
+```
+
+`ai-chat` is slow:
+
+```bash
+ai-model mid-range --pull
+```
+
+Or lower `AI_CONTEXT_LENGTH` in `/workspace/ai/ai.env`, then restart:
+
+```bash
+ai-server-stop
+ai-pull
+```
+
+405B fails to start:
+
+```text
+This usually means the VM does not have enough aggregate VRAM for the model, KV cache, and runtime overhead.
+Use mid-range, lower context, or move to a much larger multi-GPU or multi-node setup.
+```
+
+Ran `ai-code` in the wrong directory:
+
+```bash
+Ctrl+C
+cd /workspace/projects/your-project
+ai-code
+```
+
+---
+
+# Security notes
+
+Do not commit these:
+
+```text
+config/ai-sync.env
+private SSH keys
+Hugging Face tokens
+project secrets
+```
+
+The dedicated server is the durable source of truth. Back it up like you would any important development machine.
+
+Before deleting a VM:
+
+```bash
+ai-sync-status to-server
+ai-sync-to-server
 ```
