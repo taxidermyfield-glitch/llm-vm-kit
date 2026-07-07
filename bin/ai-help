@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+cat <<'MSG'
+llm-vm-kit commands
+
+Daily use:
+  ai-help                 show this command reference
+  ai-status               inspect config, GPU, installed tools, and server state
+  ai-chat [prompt]        chat with the selected local model
+  ai-code [dir] [prompt]  run OpenCode against a project or prompt
+  ai-agent [prompt]       run Hermes Agent with tools/browser support
+
+Model config and serving:
+  ai-model                show active model config and available presets
+  ai-model mid-range      select Llama 3.3 70B GGUF, llama.cpp, 32K context
+  ai-model max-power      select Hermes 3 Llama 3.1 405B, vLLM, 128K context
+  ai-model MODEL          select a custom Hugging Face model
+  ai-model MODEL --pull   select, download, and restart the selected model
+  ai-pull                 download/start the backend selected in ai.env
+  ai-server-start         start the selected backend
+  ai-server-stop          stop managed local model servers
+  ai-llama-start          start llama.cpp server directly
+  ai-llama-stop           stop llama.cpp server directly
+  ai-vllm-start           start vLLM server directly
+  ai-vllm-stop            stop vLLM server directly
+  ai-download-model       download/cache the configured llama.cpp GGUF model
+
+Sync:
+  ai-sync-from-server     pull projects, config, memory, outputs, and tool state
+  ai-sync-to-server       push durable VM state back to dedicated storage
+  ai-sync-status          dry-run push diff
+  ai-sync-status pull     dry-run pull diff
+
+Prompt and memory:
+  set-system-prompt TEXT  set the shared chat system prompt
+  set-system-prompt --show
+  set-system-prompt --clear
+  ai-set-system-prompt    alias for set-system-prompt
+  ai-memory show          list manual shared memory
+  ai-memory add TEXT      add a manual shared memory item
+  ai-memory edit [N]      edit all memory or one numbered memory item
+  ai-memory remove N      remove one memory item
+  ai-memory clear         clear manual shared memory
+  ai-memory path          print the active memory file path
+
+Browser and maintenance:
+  ai-browser-start        start headless Chrome/Chromium CDP for Hermes
+  ai-browser-reset        reset the browser automation profile
+  ai-configure            rewrite OpenCode/Hermes config from ai.env
+  ai-backup               create a local archive of /workspace/ai and projects
+
+Important files:
+  /workspace/ai/ai.env
+      active VM config
+  /workspace/ai/persistent-config/ai.env.base
+      synced base config copied to dedicated storage
+  /workspace/ai/persistent-config/memory/active.md
+      manual shared memory file
+  /opt/llm-vm-kit/config/ai-sync.env
+      VM-local dedicated-server sync settings
+
+Typical fresh VM flow:
+  cd /opt/llm-vm-kit
+  bin/ai-sync-from-server
+  bin/ai-model
+  bash bootstrap.sh
+
+Typical disposal flow:
+  ai-sync-status to-server
+  ai-sync-to-server
+MSG

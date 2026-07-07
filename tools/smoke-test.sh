@@ -14,6 +14,7 @@ required=(
   bin/ai-chat
   bin/ai-code
   bin/ai-agent
+  bin/ai-help
   bin/ai-model
   bin/ai-memory
   bin/ai-pull

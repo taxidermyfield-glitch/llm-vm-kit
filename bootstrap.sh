@@ -457,10 +457,12 @@ cat <<'MSG'
 Installed.
 
 Main commands:
+  ai-help                 show all toolkit commands and what they do
   ai-chat                 local chat through the selected model server
   ai-code                 repo coding agent through OpenCode
   ai-agent                autonomous worker through Hermes
   ai-model                show/change presets or custom Hugging Face models
+  ai-memory               show/add/edit/remove manual shared memory
   ai-pull                 pull/start the configured model backend
   ai-status               inspect GPU, tools, config, and model server state
   ai-server-start         start the configured model backend

@@ -279,6 +279,12 @@ node_modules, build outputs, Python caches, virtualenvs
 
 # Chat, coding, and agent commands
 
+Show all installed toolkit commands:
+
+```bash
+ai-help
+```
+
 Chat with the selected local model:
 
 ```bash
@@ -326,6 +332,16 @@ Diagnostics:
 ai-status
 ```
 
+Manual shared memory:
+
+```bash
+ai-memory show
+ai-memory add "User prefers sync-first bootstrap workflows."
+ai-memory edit 1 "Updated memory text."
+ai-memory remove 1
+ai-memory clear
+```
+
 ---
 
 # System prompt and shared memory
@@ -338,7 +354,7 @@ set-system-prompt --show
 set-system-prompt --clear
 ```
 
-Manual shared memory:
+Manual shared memory details:
 
 ```bash
 ai-memory show
