@@ -37,6 +37,13 @@ for f in "${required[@]}"; do
   [[ -f "$f" ]] || { echo "Missing required file: $f" >&2; exit 1; }
 done
 
+while read -r mode _ _ path; do
+  [[ "$mode" == "100755" ]] || {
+    echo "Command file is not executable in Git index: $path ($mode)" >&2
+    exit 1
+  }
+done < <(git ls-files -s 'bin/*')
+
 while IFS= read -r -d '' f; do
   bash -n "$f"
 done < <(find . -type f \( -name '*.sh' -o -path './bin/ai-*' -o -path './bin/set-system-prompt' -o -name 'install.sh' -o -name 'bootstrap.sh' \) -print0)
