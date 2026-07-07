@@ -59,83 +59,16 @@ config/ai.env.example
 
 ---
 
-# Dedicated server setup
-
-Do this once on the storage server.
-
-Install the basic server tools:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y openssh-server rsync
-```
-
-Create a user and storage root:
-
-```bash
-sudo adduser ai
-sudo mkdir -p /srv/ai-persistent/{projects,datasets,outputs,config,memory,opencode,hermes,logs,sync}
-sudo chown -R ai:ai /srv/ai-persistent
-sudo chmod 750 /srv/ai-persistent
-```
-
-Install the public SSH key that the GPU VMs will use:
-
-```bash
-sudo -u ai mkdir -p /home/ai/.ssh
-sudo -u ai nano /home/ai/.ssh/authorized_keys
-sudo chmod 700 /home/ai/.ssh
-sudo chmod 600 /home/ai/.ssh/authorized_keys
-```
-
-Only the public key goes in `authorized_keys`. The matching private key lives on each GPU VM, usually at:
-
-```text
-~/.ssh/ai_sync_ed25519
-```
-
-The private key should not live in the GitHub repo.
-
-Create the initial synced model/config preset:
-
-```bash
-sudo -u ai nano /srv/ai-persistent/config/ai.env.base
-```
-
-Start with the mid-range default:
-
-```bash
-AI_MODEL_PRESET="llama-3.3-70b"
-AI_BACKEND="llamacpp"
-AI_HF_MODEL="hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M"
-AI_MODEL_QUANT="Q4_K_M"
-AI_MODEL="local-ai"
-AI_CONTEXT_LENGTH="32768"
-AI_OPENAI_BASE_URL="http://127.0.0.1:18080/v1"
-
-AI_HOME="/workspace/ai"
-AI_PROJECTS="/workspace/projects"
-AI_HERMES_HOME="/workspace/ai/hermes"
-AI_OPENCODE_HOME="/workspace/ai/opencode"
-AI_SYSTEM_PROMPT_FILE="/workspace/ai/persistent-config/system-prompt.txt"
-AI_MEMORY_FILE="/workspace/ai/persistent-config/memory/active.md"
-```
-
-That file is the dedicated server's base config. Fresh VMs pull it down as `/workspace/ai/ai.env`.
-
----
-
 # Fresh GPU VM workflow
 
-Do this each time you create a new Vast or other GPU VM.
+Do this each time you create a new Vast or other GPU VM. These commands assume you are logged in as `root`, which is the simplest path on most disposable GPU rentals.
 
 Install the small set of tools needed before bootstrap:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y git rsync openssh-client python3
-sudo mkdir -p /workspace
-sudo chown "$USER:$USER" /workspace
+apt-get update
+apt-get install -y git rsync openssh-client python3 nano
+mkdir -p /workspace /opt
 ```
 
 Install the private SSH key for sync:
@@ -155,9 +88,7 @@ ssh -i ~/.ssh/ai_sync_ed25519 ai@DEDICATED_IP 'echo sync-ok'
 Clone the toolkit:
 
 ```bash
-sudo mkdir -p /opt
-sudo chown "$USER:$USER" /opt
-git clone https://github.com/YOUR_USERNAME/llm-vm-kit.git /opt/llm-vm-kit
+git clone https://github.com/taxidermyfield-glitch/llm-vm-kit.git /opt/llm-vm-kit
 cd /opt/llm-vm-kit
 ```
 
@@ -175,7 +106,7 @@ AI_SYNC_REMOTE_USER="ai"
 AI_SYNC_REMOTE_HOST="DEDICATED_IP"
 AI_SYNC_REMOTE_PORT="22"
 AI_SYNC_REMOTE_ROOT="/srv/ai-persistent"
-AI_SYNC_SSH_KEY="$HOME/.ssh/ai_sync_ed25519"
+AI_SYNC_SSH_KEY="/root/.ssh/ai_sync_ed25519"
 AI_SYNC_LOCAL_ROOT="/workspace"
 AI_SYNC_AI_HOME="/workspace/ai"
 ```
@@ -204,10 +135,10 @@ bin/ai-sync-to-server
 Install dependencies and pull/start the selected model:
 
 ```bash
-sudo bash bootstrap.sh
+bash bootstrap.sh
 ```
 
-Bootstrap requires the selected backend and attempts to install the other built-in backend too, so later preset switches are easier. It only downloads the currently selected model. If optional backend install fails, switch presets first and rerun `sudo bash bootstrap.sh` on that VM.
+Bootstrap requires the selected backend and attempts to install the other built-in backend too, so later preset switches are easier. It only downloads the currently selected model. If optional backend install fails, switch presets first and rerun `bash bootstrap.sh` on that VM.
 
 Check the machine:
 
@@ -441,7 +372,7 @@ On a VM:
 ```bash
 cd /opt/llm-vm-kit
 git pull --ff-only
-sudo bash bootstrap.sh
+bash bootstrap.sh
 ```
 
 If you changed durable config or state before updating:
@@ -450,7 +381,7 @@ If you changed durable config or state before updating:
 ai-sync-to-server
 git pull --ff-only
 bin/ai-sync-from-server
-sudo bash bootstrap.sh
+bash bootstrap.sh
 ```
 
 ---
@@ -462,7 +393,7 @@ Bootstrap says `/workspace/ai/ai.env` is missing:
 ```bash
 cd /opt/llm-vm-kit
 bin/ai-sync-from-server
-sudo bash bootstrap.sh
+bash bootstrap.sh
 ```
 
 If the dedicated server is new, create `/srv/ai-persistent/config/ai.env.base` first.
@@ -538,3 +469,69 @@ Before deleting a VM:
 ai-sync-status to-server
 ai-sync-to-server
 ```
+
+---
+
+# Dedicated server setup
+
+Do this once on the storage server.
+
+Install the basic server tools:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y openssh-server rsync
+```
+
+Create a user and storage root:
+
+```bash
+sudo adduser ai
+sudo mkdir -p /srv/ai-persistent/{projects,datasets,outputs,config,memory,opencode,hermes,logs,sync}
+sudo chown -R ai:ai /srv/ai-persistent
+sudo chmod 750 /srv/ai-persistent
+```
+
+Install the public SSH key that the GPU VMs will use:
+
+```bash
+sudo -u ai mkdir -p /home/ai/.ssh
+sudo -u ai nano /home/ai/.ssh/authorized_keys
+sudo chmod 700 /home/ai/.ssh
+sudo chmod 600 /home/ai/.ssh/authorized_keys
+```
+
+Only the public key goes in `authorized_keys`. The matching private key lives on each GPU VM, usually at:
+
+```text
+~/.ssh/ai_sync_ed25519
+```
+
+The private key should not live in the GitHub repo.
+
+Create the initial synced model/config preset:
+
+```bash
+sudo -u ai nano /srv/ai-persistent/config/ai.env.base
+```
+
+Start with the mid-range default:
+
+```bash
+AI_MODEL_PRESET="llama-3.3-70b"
+AI_BACKEND="llamacpp"
+AI_HF_MODEL="hf.co/bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF:Q4_K_M"
+AI_MODEL_QUANT="Q4_K_M"
+AI_MODEL="local-ai"
+AI_CONTEXT_LENGTH="32768"
+AI_OPENAI_BASE_URL="http://127.0.0.1:18080/v1"
+
+AI_HOME="/workspace/ai"
+AI_PROJECTS="/workspace/projects"
+AI_HERMES_HOME="/workspace/ai/hermes"
+AI_OPENCODE_HOME="/workspace/ai/opencode"
+AI_SYSTEM_PROMPT_FILE="/workspace/ai/persistent-config/system-prompt.txt"
+AI_MEMORY_FILE="/workspace/ai/persistent-config/memory/active.md"
+```
+
+That file is the dedicated server's base config. Fresh VMs pull it down as `/workspace/ai/ai.env`.
